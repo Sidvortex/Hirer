@@ -64,6 +64,7 @@ pip install -r requirements.txt
 ### 4. Get the dataset
 
 Download candidates.jsonl from the Redrob challenge page and place it inside the data/ folder:
+Here is the link to the dataset : https://hack2skill.com/event/india_runs/dashboard/resources?utm_source=hack2skill&utm_medium=homepage
 
 ```
 data/candidates.jsonl
