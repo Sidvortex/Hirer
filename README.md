@@ -51,7 +51,17 @@ Hirer/
 
 ```bash
 pip install -r requirements.txt
-python src/ranking.py
+python src/ranking.py --candidates
+```
+```bash
+"just for myself coz i dont't want to write this whole command every time"
+pip install -r requirements.txt
+python src/ranking.py --candidates "/home/sidvortex/Documents/project/[PUB] India_runs_data_and_ai_challenge/[PUB] India_runs_data_and_ai_challenge/India_runs_data_and_ai_challenge/candidates.jsonl" --out output/submission.csv
+```
+```bash
+"No-semantic run pipeline for faster outputs"
+pip install -r requirements.txt
+python src/ranking.py --candidates "/home/sidvortex/Documents/project/[PUB] India_runs_data_and_ai_challenge/[PUB] India_runs_data_and_ai_challenge/India_runs_data_and_ai_challenge/candidates.jsonl" --out output/submission.csv --no-semantic
 ```
 
 The ranked output file will be generated in the output folder.
