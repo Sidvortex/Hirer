@@ -105,3 +105,4 @@ Runs in about 3-4 minutes on CPU for full 100k dataset.
 
 Ravada Siddharth - ML Engineer  
 Ishan Gupta - Data Engineer
+Ayush Mishra - Frontend Dev
