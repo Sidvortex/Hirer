@@ -37,7 +37,7 @@ def skill_score(candidate):
     score = min(score, 1.0)
 
     if neg_matches > 0:
-        score *= max(0.6, 1 - 0.1 * neg_matches)
+        score *= max(0.5, 1 - 0.15 * neg_matches)
 
     return score
 
