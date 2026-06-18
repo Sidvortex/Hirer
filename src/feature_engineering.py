@@ -1,4 +1,5 @@
 import numpy as np
+from utils import days_since
 
 
 # keywords from the JD
@@ -85,6 +86,35 @@ def education_score(candidate):
     return best
 
 
+def behavioral_score(candidate):
+    sig = candidate.get('redrob_signals', {})
+    scores = []
+
+    # activity recency
+    days_inactive = days_since(sig.get('last_active_date', '2020-01-01'))
+    if days_inactive <= 7:
+        activity = 1.0
+    elif days_inactive <= 30:
+        activity = 0.8
+    elif days_inactive <= 90:
+        activity = 0.5
+    else:
+        activity = 0.1
+    scores.append(('activity', activity, 0.25))
+
+    # open to work
+    otw = 1.0 if sig.get('open_to_work_flag', False) else 0.3
+    scores.append(('open_to_work', otw, 0.2))
+
+    # recruiter response rate
+    rr = sig.get('recruiter_response_rate', 0.5)
+    scores.append(('response_rate', rr, 0.2))
+
+    total = sum(s * w for _, s, w in scores)
+    total_weight = sum(w for _, _, w in scores)
+    return total / total_weight
+
+
 def get_features(candidate):
     return {
         'candidate_id': candidate['candidate_id'],
@@ -92,6 +122,7 @@ def get_features(candidate):
         'experience_score': experience_score(candidate),
         'title_score': title_score(candidate),
         'education_score': education_score(candidate),
+        'behavioral_score': behavioral_score(candidate),
     }
 
 
