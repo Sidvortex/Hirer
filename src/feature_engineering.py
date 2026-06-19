@@ -110,6 +110,40 @@ def behavioral_score(candidate):
     rr = sig.get('recruiter_response_rate', 0.5)
     scores.append(('response_rate', rr, 0.2))
 
+    # github score
+    gh = sig.get('github_activity_score', -1)
+    if gh == -1:
+        gh_score = 0.3
+    else:
+        gh_score = gh / 100.0
+    scores.append(('github', gh_score, 0.15))
+
+    # notice period
+    np_days = sig.get('notice_period_days', 60)
+    if np_days <= 30:
+        np_score = 1.0
+    elif np_days <= 60:
+        np_score = 0.7
+    elif np_days <= 90:
+        np_score = 0.4
+    else:
+        np_score = 0.2
+    scores.append(('notice', np_score, 0.1))
+
+    # response time
+    avg_rt = sig.get('avg_response_time_hours', 48)
+    if avg_rt <= 2:
+        rt_score = 1.0
+    elif avg_rt <= 12:
+        rt_score = 0.8
+    elif avg_rt <= 24:
+        rt_score = 0.6
+    elif avg_rt <= 72:
+        rt_score = 0.3
+    else:
+        rt_score = 0.1
+    scores.append(('response_time', rt_score, 0.1))
+
     total = sum(s * w for _, s, w in scores)
     total_weight = sum(w for _, _, w in scores)
     return total / total_weight
