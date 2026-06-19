@@ -178,3 +178,5 @@ def _get_full_text(candidate):
         parts.append(cert.get('name', ''))
 
     return ' '.join(parts)
+
+# done with behavioral signals
