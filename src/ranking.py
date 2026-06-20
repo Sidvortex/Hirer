@@ -38,8 +38,8 @@ def rank_candidates(candidates_path, output_path, top_n=100):
 
     # trying these weights for now
     final_scores = (
-        normalize_0_1(combined_skill.values) * 0.45 +
-        normalize_0_1(behavioral_arr) * 0.55
+        normalize_0_1(combined_skill.values) * 0.60 +
+        normalize_0_1(behavioral_arr) * 0.40
     )
 
     sorted_idx = np.argsort(-final_scores)
