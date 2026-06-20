@@ -26,16 +26,23 @@ def rank_candidates(candidates_path, output_path, top_n=100):
 
     feat_df = pd.DataFrame(feature_rows)
 
-    # combine scores
-    # TODO: add semantic and behavioral later
-    final_scores = (
+    # combine skill + experience + title + education
+    combined_skill = (
         feat_df['skill_score'] * 0.5 +
         feat_df['experience_score'] * 0.25 +
         feat_df['title_score'] * 0.15 +
         feat_df['education_score'] * 0.10
     )
 
-    sorted_idx = np.argsort(-final_scores.values)
+    behavioral_arr = feat_df['behavioral_score'].values
+
+    # trying these weights for now
+    final_scores = (
+        normalize_0_1(combined_skill.values) * 0.45 +
+        normalize_0_1(behavioral_arr) * 0.55
+    )
+
+    sorted_idx = np.argsort(-final_scores)
     top_idx = sorted_idx[:top_n]
 
     rows = []
@@ -44,7 +51,7 @@ def rank_candidates(candidates_path, output_path, top_n=100):
         rows.append({
             'candidate_id': c['candidate_id'],
             'rank': rank,
-            'score': round(final_scores.iloc[idx], 4),
+            'score': round(final_scores[idx], 4),
             'reasoning': f"{c['profile']['current_title']} with {c['profile']['years_of_experience']} yrs exp."
         })
 
