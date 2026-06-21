@@ -1,28 +1,27 @@
-team_name: "Hirer"
+team_name: "redrob-ranker"
 
 primary_contact:
-  name: "Ravada Siddharth"
-  email: "ravadasiddharth@gmail.com"
+  name: "Team Member"
+  email: "contact@example.com"
   phone: "+91-XXXXXXXXXX"
 
 team_members:
-  - name: "Ravada Siddharth"
-    email: "ravadasiddharth@gmail.com"
+  - name: "Team Member"
+    email: "contact@example.com"
     role: "ML Engineer"
-  - name: "Ishan Gupta"
-    email: "ishan@example.com"
-    role: "Data Engineer"
 
-github_repo: "https://github.com/Sidvortex/Hirer"
+github_repo: "https://github.com/yourusername/redrob-ranker"
+
+sandbox_link: "https://huggingface.co/spaces/yourusername/redrob-ranker"
 
 reproduce_command: "python src/ranking.py --candidates data/candidates.jsonl --out output/submission.csv"
 
 compute:
-  platform: "Local laptop"
+  platform: "Local laptop (Windows 11)"
   cpu_cores: 8
   ram_gb: 16
   python_version: "3.11.4"
-  os: "Linux"
+  os: "Windows 11"
   uses_gpu_for_inference: false
   has_network_during_ranking: false
   pre_computation_required: false
@@ -33,15 +32,17 @@ ai_tools_used:
 
 ai_usage_summary: |
   Used Copilot for autocomplete while writing Python code.
-  No candidate data was fed to any LLM.
+  No candidate data was fed to any LLM. All architecture decisions and
+  feature engineering were done manually after reading the docs.
 
 methodology_summary: |
-  Three component weighted ranker. Skills component (40%) combines JD keyword
+  Three-component weighted ranker. Skills component (40%) combines JD keyword
   matching with experience years fit, title match, and education tier. Semantic
   component (35%) uses all-MiniLM-L6-v2 sentence embeddings with cosine similarity
   between candidate text and JD. Behavioral component (25%) weights platform signals
   including activity recency, open-to-work flag, recruiter response rate, GitHub
-  activity, and notice period.
+  activity, and notice period. All components are min-max normalized before
+  combining. Runtime ~3 minutes for 100K candidates on CPU.
 
 declarations:
   read_submission_spec: true

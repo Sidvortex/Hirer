@@ -11,7 +11,7 @@ def load_candidates(path):
         opener = gzip.open(path, 'rt', encoding='utf-8')
     else:
         opener = open(path, 'r', encoding='utf-8')
-
+    
     with opener as f:
         for line in f:
             line = line.strip()
@@ -28,7 +28,7 @@ def days_since(date_str, ref_date=None):
         d = datetime.strptime(date_str, '%Y-%m-%d').date()
         return (ref_date - d).days
     except:
-        return 365
+        return 365  # default to 1 year if parse fails
 
 
 def normalize_0_1(arr):
@@ -40,10 +40,15 @@ def normalize_0_1(arr):
     return (arr - mn) / (mx - mn)
 
 
+def get_all_skill_names(candidate):
+    """flatten skill names from a candidate"""
+    return [s['name'].lower() for s in candidate.get('skills', [])]
+
+
 def build_candidate_text(candidate):
     """make a text blob for semantic matching"""
     parts = []
-
+    
     p = candidate.get('profile', {})
     if p.get('headline'):
         parts.append(p['headline'])
@@ -51,15 +56,17 @@ def build_candidate_text(candidate):
         parts.append(p['summary'])
     if p.get('current_title'):
         parts.append(p['current_title'])
-
+    
+    # add skills
     skills = [s['name'] for s in candidate.get('skills', [])]
     if skills:
         parts.append('Skills: ' + ', '.join(skills))
-
+    
+    # career descriptions (first 2 roles)
     for job in candidate.get('career_history', [])[:2]:
         if job.get('title'):
             parts.append(job['title'])
         if job.get('description'):
             parts.append(job['description'][:300])
-
+    
     return ' '.join(parts)
