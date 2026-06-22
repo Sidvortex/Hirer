@@ -26,7 +26,7 @@ NLP, information retrieval, semantic search, LLM fine-tuning, learning to rank.
 """
 
 # trying sentence transformers now - Ishan suggested this
-def compute_semantic_scores(candidates, batch_size=64):
+def compute_semantic_scores(candidates, batch_size=32):
     try:
         from sentence_transformers import SentenceTransformer
         from sklearn.metrics.pairwise import cosine_similarity
