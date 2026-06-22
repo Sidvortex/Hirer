@@ -11,7 +11,7 @@ def load_candidates(path):
         opener = gzip.open(path, 'rt', encoding='utf-8')
     else:
         opener = open(path, 'r', encoding='utf-8')
-    
+
     with opener as f:
         for line in f:
             line = line.strip()
@@ -38,3 +38,28 @@ def normalize_0_1(arr):
     if mx == mn:
         return np.zeros_like(arr)
     return (arr - mn) / (mx - mn)
+
+
+def build_candidate_text(candidate):
+    """make a text blob for semantic matching"""
+    parts = []
+
+    p = candidate.get('profile', {})
+    if p.get('headline'):
+        parts.append(p['headline'])
+    if p.get('summary'):
+        parts.append(p['summary'])
+    if p.get('current_title'):
+        parts.append(p['current_title'])
+
+    skills = [s['name'] for s in candidate.get('skills', [])]
+    if skills:
+        parts.append('Skills: ' + ', '.join(skills))
+
+    for job in candidate.get('career_history', [])[:2]:
+        if job.get('title'):
+            parts.append(job['title'])
+        if job.get('description'):
+            parts.append(job['description'][:300])
+
+    return ' '.join(parts)
