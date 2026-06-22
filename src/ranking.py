@@ -10,8 +10,47 @@ import pandas as pd
 from tqdm import tqdm
 
 sys.path.insert(0, os.path.dirname(__file__))
-from utils import load_candidates, normalize_0_1
+from utils import load_candidates, normalize_0_1, build_candidate_text
 from feature_engineering import get_features, MUST_HAVE_SKILLS, _get_full_text
+
+
+# the job description text for semantic matching
+JD_TEXT = """
+Senior AI Engineer founding team role at Redrob AI.
+Requirements: Production experience with embeddings-based retrieval systems using sentence-transformers,
+OpenAI embeddings, BGE, E5 or similar. Vector databases and hybrid search infrastructure:
+Pinecone, Weaviate, Qdrant, Milvus, OpenSearch, Elasticsearch, FAISS.
+Strong Python. Evaluation frameworks for ranking systems: NDCG, MRR, MAP, A/B testing.
+NLP, information retrieval, semantic search, LLM fine-tuning, learning to rank.
+5-9 years experience. Location: Pune or Noida India, willing to relocate.
+"""
+
+# trying sentence transformers now - Ishan suggested this
+def compute_semantic_scores(candidates, batch_size=64):
+    try:
+        from sentence_transformers import SentenceTransformer
+        from sklearn.metrics.pairwise import cosine_similarity
+    except ImportError:
+        print("sentence-transformers not installed, skipping")
+        return [0.5] * len(candidates)
+
+    print("Loading sentence transformer model...")
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+
+    jd_embedding = model.encode([JD_TEXT])
+
+    print(f"Encoding {len(candidates)} candidates...")
+    texts = [build_candidate_text(c) for c in candidates]
+
+    embeddings = []
+    for i in tqdm(range(0, len(texts), batch_size), desc="Encoding"):
+        batch = texts[i:i+batch_size]
+        emb = model.encode(batch, show_progress_bar=False)
+        embeddings.append(emb)
+
+    all_embeddings = np.vstack(embeddings)
+    sims = cosine_similarity(jd_embedding, all_embeddings)[0]
+    return sims.tolist()
 
 
 def build_reasoning(candidate, final_score):
@@ -41,7 +80,7 @@ def build_reasoning(candidate, final_score):
     return '; '.join(parts) + '.'
 
 
-def rank_candidates(candidates_path, output_path, top_n=100):
+def rank_candidates(candidates_path, output_path, top_n=100, use_semantic=True):
     print(f"Loading candidates from {candidates_path}...")
     candidates = load_candidates(candidates_path)
     print(f"Loaded {len(candidates)} candidates")
@@ -53,7 +92,6 @@ def rank_candidates(candidates_path, output_path, top_n=100):
 
     feat_df = pd.DataFrame(feature_rows)
 
-    # combine skill + experience + title + education
     combined_skill = (
         feat_df['skill_score'] * 0.5 +
         feat_df['experience_score'] * 0.25 +
@@ -61,11 +99,17 @@ def rank_candidates(candidates_path, output_path, top_n=100):
         feat_df['education_score'] * 0.10
     )
 
+    if use_semantic:
+        semantic_scores = compute_semantic_scores(candidates)
+    else:
+        semantic_scores = [0.5] * len(candidates)
+
+    semantic_arr = np.array(semantic_scores)
     behavioral_arr = feat_df['behavioral_score'].values
 
     final_scores = (
         normalize_0_1(combined_skill.values) * 0.60 +
-        normalize_0_1(behavioral_arr) * 0.40
+        normalize_0_1(semantic_arr) * 0.40
     )
 
     sorted_idx = np.argsort(-final_scores)
@@ -94,6 +138,7 @@ if __name__ == '__main__':
     parser.add_argument('--candidates', required=True)
     parser.add_argument('--out', default='output/submission.csv')
     parser.add_argument('--top-n', type=int, default=100)
+    parser.add_argument('--no-semantic', action='store_true')
     args = parser.parse_args()
 
-    rank_candidates(args.candidates, args.out, top_n=args.top_n)
+    rank_candidates(args.candidates, args.out, top_n=args.top_n, use_semantic=not args.no_semantic)
