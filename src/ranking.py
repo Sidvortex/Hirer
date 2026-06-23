@@ -25,8 +25,14 @@ NLP, information retrieval, semantic search, LLM fine-tuning, learning to rank.
 5-9 years experience. Location: Pune or Noida India, willing to relocate.
 """
 
-# trying sentence transformers now - Ishan suggested this
-def compute_semantic_scores(candidates, batch_size=32):
+WEIGHTS = {
+    'skill': 0.40,
+    'semantic': 0.35,
+    'behavioral': 0.25,
+}
+
+
+def compute_semantic_scores(candidates, batch_size=64):
     try:
         from sentence_transformers import SentenceTransformer
         from sklearn.metrics.pairwise import cosine_similarity
@@ -107,9 +113,11 @@ def rank_candidates(candidates_path, output_path, top_n=100, use_semantic=True):
     semantic_arr = np.array(semantic_scores)
     behavioral_arr = feat_df['behavioral_score'].values
 
+    # combined all three now
     final_scores = (
-        normalize_0_1(combined_skill.values) * 0.60 +
-        normalize_0_1(semantic_arr) * 0.40
+        WEIGHTS['skill'] * normalize_0_1(combined_skill.values) +
+        WEIGHTS['semantic'] * normalize_0_1(semantic_arr) +
+        WEIGHTS['behavioral'] * normalize_0_1(behavioral_arr)
     )
 
     sorted_idx = np.argsort(-final_scores)
