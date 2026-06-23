@@ -1,6 +1,7 @@
 """
 ranking pipeline
 """
+# results look much better with embeddings - Ishan was right
 
 import argparse
 import sys
