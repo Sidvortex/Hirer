@@ -5,3 +5,4 @@ __pycache__/
 output/submission.csv
 *.jsonl
 *.json.gz
+.ipynb_checkpoints/
