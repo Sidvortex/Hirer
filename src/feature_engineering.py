@@ -1,6 +1,6 @@
 import numpy as np
 from utils import days_since
-
+# cleanup - removing unused imports and tidying up
 
 # keywords from the JD
 MUST_HAVE_SKILLS = [
