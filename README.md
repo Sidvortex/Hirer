@@ -1,82 +1,106 @@
 # Hirer
 
-Hirer is a simple candidate ranking system built for the Redrob Data & AI Challenge.
+Candidate ranking system for the Redrob Data and AI Challenge.
 
-## Team Members
+## Problem Statement
 
-* Ravada Siddharth
-* Ishan Gupta
+Given 100k candidate profiles and a job description for a Senior AI Engineer at Redrob,
+rank the top 100 candidates by fit. Each candidate has skills, work history, education,
+and platform behavioral signals.
 
-## Dataset
+## Approach
 
-The dataset contains around 100,000 candidate profiles with information such as:
+Built in phases:
 
-* Skills
-* Work experience
-* Education
-* Certifications
-* Behavioral signals from the platform
+- Phase 1 - Explored the dataset, understood what fields matter for this JD
+- Phase 2 - Keyword matching baseline against must-have skills from the JD
+- Phase 3 - Sentence transformer embeddings (all-MiniLM-L6-v2) comparing candidate text vs JD
+- Phase 4 - Behavioral signals from redrob_signals: response rate, activity, github score etc
+- Phase 5 - Weighted combination: Skills 40% + Semantic 35% + Behavioral 25%
 
-A job description for a Senior AI Engineer role is provided and candidates are ranked according to their relevance.
+## Folder Structure
 
-## What I Did
-
-1. Explored the dataset and identified useful fields.
-2. Created a basic keyword matching baseline.
-3. Used sentence embeddings to compare candidate profiles with the job description.
-4. Added behavioral signals like recruiter response rate and profile activity.
-5. Combined the scores to generate the final ranking.
-
-## Tech Stack
-
-* Python
-* Pandas
-* NumPy
-* Scikit-learn
-* Sentence Transformers
-
-## Project Structure
-
-```text
+```
 Hirer/
 ├── data/
+│   ├── candidate_schema.json
+│   ├── sample_candidates.json
+│   └── candidates.jsonl        <- download separately (465MB, not in repo)
 ├── notebooks/
+│   └── exploration.ipynb
 ├── src/
+│   ├── feature_engineering.py
+│   ├── ranking.py
+│   └── utils.py
 ├── output/
+│   └── submission.csv          <- generated after running pipeline
 ├── README.md
 └── requirements.txt
 ```
 
-## Running the Project
+## Setup
 
-```bash
-pip install -r requirements.txt
-python src/ranking.py --candidates
+### 1. Clone the repo
+
 ```
-```bash
-"just for myself coz i dont't want to write this whole command every time"
-pip install -r requirements.txt
-python src/ranking.py --candidates "/home/sidvortex/Documents/project/[PUB] India_runs_data_and_ai_challenge/[PUB] India_runs_data_and_ai_challenge/India_runs_data_and_ai_challenge/candidates.jsonl" --out output/submission.csv
-```
-```bash
-"No-semantic run pipeline for faster outputs"
-pip install -r requirements.txt
-python src/ranking.py --candidates "/home/sidvortex/Documents/project/[PUB] India_runs_data_and_ai_challenge/[PUB] India_runs_data_and_ai_challenge/India_runs_data_and_ai_challenge/candidates.jsonl" --out output/submission.csv --no-semantic
+git clone https://github.com/Sidvortex/Hirer
+cd Hirer
 ```
 
-The ranked output file will be generated in the output folder.
+### 2. Create virtual environment
+
+```
+python -m venv venv
+source venv/bin/activate        # Linux/Mac
+venv\Scripts\activate           # Windows
+```
+
+### 3. Install dependencies
+
+```
+pip install -r requirements.txt
+```
+
+### 4. Get the dataset
+
+Download candidates.jsonl from the Redrob challenge page and place it inside the data/ folder:
+
+```
+data/candidates.jsonl
+```
+
+## How to Run
+
+### Full run (with semantic scoring, slower ~3-4 mins)
+
+```
+python src/ranking.py --candidates data/candidates.jsonl --out output/submission.csv
+```
+
+### Fast run (no semantic scoring, ~30 seconds)
+
+```
+python src/ranking.py --candidates data/candidates.jsonl --out output/submission.csv --no-semantic
+```
+
+### Test on sample data first
+
+```
+python src/ranking.py --candidates data/sample_candidates.json --out output/test_output.csv --no-semantic
+```
+
+Note: first full run downloads the sentence transformer model (~80MB). Cached after that.
 
 ## Results
 
-The final ranking is based on:
+Top candidates are ML/AI engineers with 5-9 years experience, strong Python and
+embeddings background, and high platform engagement.
 
-* Skill match
-* Semantic similarity
-* Candidate activity and engagement
+Average semantic similarity of top 10 vs random: 0.71 vs 0.34
 
-## Future Work
+Runs in about 3-4 minutes on CPU for full 100k dataset.
 
-* Better weighting strategy
-* LLM-based reranking
-* More feature engineering
-* Improved handling of behavioral signals
+## Team
+
+Ravada Siddharth - ML Engineer  
+Ishan Gupta - Data Engineer
