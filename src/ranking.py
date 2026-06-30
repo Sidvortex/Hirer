@@ -2,6 +2,7 @@
 ranking pipeline
 """
 # results look much better with embeddings - Ishan was right
+# tested on full dataset - runs in about 3 mins on CPU
 
 import argparse
 import sys
