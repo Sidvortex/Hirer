@@ -245,7 +245,7 @@ function RealLoadingScreen({
       formData.append("use_semantic", String(semantic));
 
       try {
-        const res = await fetch("http://localhost:8000/rank", { method: "POST", body: formData });
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/rank`, { method: "POST", body: formData });
         if (!res.ok) { const err = await res.json(); onError(err.detail || "Server error"); return; }
 
         const reader = res.body!.getReader();
@@ -274,7 +274,7 @@ function RealLoadingScreen({
               jobId = parsed.job_id;
               setPct(100);
               setSteps((s) => [...s, "Done!"]);
-              const preview = await fetch(`http://localhost:8000/preview/${jobId}?limit=100`);
+              const preview = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/preview/${jobId}?limit=100`);
               const previewData = await preview.json();
               onDone(jobId, previewData.results);
             }
@@ -324,7 +324,7 @@ function ResultsScreen({
 
   const downloadCSV = () => {
     if (jobId) {
-      window.open(`http://localhost:8000/download/${jobId}`, "_blank");
+      window.open(`${process.env.NEXT_PUBLIC_API_URL}/download/${jobId}`);
     } else {
       const rows = ["candidate_id,rank,score,reasoning", ...displayed.map((c) => `${c.candidate_id},${c.rank},${c.score},"${c.reasoning}"`)];
       const blob = new Blob([rows.join("\n")], { type: "text/csv" });
