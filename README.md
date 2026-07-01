@@ -297,7 +297,7 @@ MUIT Noida · 2023–2027
 
 Built the ranking pipeline, semantic embeddings integration, behavioral scoring system, and full stack web app.
 
-[![GitHub](https://img.shields.io/badge/GitHub-Sid-181717?style=flat&logo=github)](https://github.com/Sidvortex)
+[![GitHub](https://img.shields.io/badge/GitHub-Sidvortex-181717?style=flat&logo=github)](https://github.com/Sidvortex)
 [![Email](https://img.shields.io/badge/Email-ravadasiddharth@gmail.com-EA4335?style=flat&logo=gmail)](mailto:ravadasiddharth@gmail.com)
 
 </td>
@@ -311,8 +311,8 @@ ITS Ghaziabad · 2023–2026
 
 Worked on feature engineering, data loading pipeline, keyword matching logic, and dataset exploration.
 
-[![GitHub](https://img.shields.io/badge/GitHub-Ishu-181717?style=flat&logo=github)](https://github.com/IshanGupta-Code)
-[![Email](https://img.shields.io/badge/Email-guptaishan506@gmail.com-EA4335?style=flat&logo=gmail)](mailto:guptaishan506@gmail.com)
+[![GitHub](https://img.shields.io/badge/GitHub-ishan--gupta-181717?style=flat&logo=github)](https://github.com/IshanGupta-Code)
+[![Email](https://img.shields.io/badge/Email-ishan@example.com-EA4335?style=flat&logo=gmail)](#)
 
 </td>
 <td align="center" width="33%">
@@ -325,8 +325,8 @@ MUIT Noida · 2023–2027
 
 Built the frontend interface, presentation slides, project documentation, and submission materials.
 
-[![GitHub](https://img.shields.io/badge/GitHub-Ayush-181717?style=flat&logo=github)](https://github.com/ayush77-pro)
-[![Email](https://img.shields.io/badge/Email-am8172689@gmail.com-EA4335?style=flat&logo=gmail)](mailto:am8172689@gmail.com)
+[![GitHub](https://img.shields.io/badge/GitHub-ayush-181717?style=flat&logo=github)](https://github.com/ayush77-pro)
+[![Email](https://img.shields.io/badge/Email-ayush@example.com-EA4335?style=flat&logo=gmail)](#)
 
 </td>
 </tr>
@@ -344,7 +344,7 @@ Built the frontend interface, presentation slides, project documentation, and su
 |-------|---------|
 | **Challenge** | Redrob Data & AI Challenge 2026 |
 | **Submission Deadline** | July 2, 2026 |
-| **Project Name** | Hirer |
+
 ---
 
 ## 🤝 Contributing

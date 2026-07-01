@@ -10,6 +10,10 @@ import DisplayCards from "@/components/ui/display-cards";
 import NotFound1 from "@/components/ui/8bit-not-found1";
 import { Briefcase, Code, Search, BarChart2, Brain, Sparkles, Upload, GitBranch, ExternalLink, Mail } from "lucide-react";
 
+// Backend base URL — set NEXT_PUBLIC_API_URL in .env.local for dev and in
+// your Vercel project settings for production (e.g. https://your-api.up.railway.app)
+const API = process.env.NEXT_PUBLIC_API_URL!;
+
 type Screen = "boot" | "home" | "select" | "loading" | "results" | "about" | "error";
 
 interface Candidate {
@@ -245,40 +249,35 @@ function RealLoadingScreen({
       formData.append("use_semantic", String(semantic));
 
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/rank`, { method: "POST", body: formData });
+        // 1. kick off the job — backend returns immediately with a job_id
+        const res = await fetch(`${API}/rank`, { method: "POST", body: formData });
         if (!res.ok) { const err = await res.json(); onError(err.detail || "Server error"); return; }
+        const { job_id: jobId } = await res.json();
 
-        const reader = res.body!.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let jobId = "";
-
+        // 2. poll /status/{job_id} every second until done or error
+        let seenSteps = 0;
         while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const parts = buffer.split("\n\n");
-          buffer = parts.pop() || "";
+          await new Promise((r) => setTimeout(r, 1000));
 
-          for (const part of parts) {
-            const lines = part.split("\n");
-            let event = ""; let data = "";
-            for (const line of lines) {
-              if (line.startsWith("event: ")) event = line.slice(7);
-              if (line.startsWith("data: ")) data = line.slice(6);
-            }
-            if (!event || !data) continue;
-            const parsed = JSON.parse(data);
-            if (event === "progress") { setSteps((s) => [...s, parsed.step]); setPct(parsed.pct); }
-            if (event === "done") {
-              jobId = parsed.job_id;
-              setPct(100);
-              setSteps((s) => [...s, "Done!"]);
-              const preview = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/preview/${jobId}?limit=100`);
-              const previewData = await preview.json();
-              onDone(jobId, previewData.results);
-            }
-            if (event === "error") { onError(parsed.message); return; }
+          const statusRes = await fetch(`${API}/status/${jobId}`);
+          if (!statusRes.ok) { onError("Lost track of the job. Please try again."); return; }
+          const status = await statusRes.json();
+
+          // only append newly-seen steps so we don't duplicate them each poll
+          if (status.steps && status.steps.length > seenSteps) {
+            setSteps((s) => [...s, ...status.steps.slice(seenSteps)]);
+            seenSteps = status.steps.length;
+          }
+          setPct(status.pct);
+
+          if (status.status === "error") { onError(status.error || "Something went wrong"); return; }
+
+          if (status.status === "done") {
+            setPct(100);
+            const preview = await fetch(`${API}/preview/${jobId}?limit=100`);
+            const previewData = await preview.json();
+            onDone(jobId, previewData.results);
+            return;
           }
         }
       } catch (e: unknown) {
@@ -324,7 +323,7 @@ function ResultsScreen({
 
   const downloadCSV = () => {
     if (jobId) {
-      window.open(`${process.env.NEXT_PUBLIC_API_URL}/download/${jobId}`);
+      window.open(`${API}/download/${jobId}`, "_blank");
     } else {
       const rows = ["candidate_id,rank,score,reasoning", ...displayed.map((c) => `${c.candidate_id},${c.rank},${c.score},"${c.reasoning}"`)];
       const blob = new Blob([rows.join("\n")], { type: "text/csv" });
