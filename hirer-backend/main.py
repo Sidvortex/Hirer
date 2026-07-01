@@ -23,11 +23,22 @@ app = FastAPI(title="Hirer API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+
+        # Your Vercel production site
+        "https://hirer-pearl.vercel.app",
+
+        # Optional: add your git preview deployment if you use it
+        "https://hirer-git-main-sidmindmirrors-projects.vercel.app",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
+
 
 # temp storage for jobs
 JOBS: dict[str, dict] = {}
