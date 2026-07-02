@@ -26,7 +26,7 @@
 
 <br/>
 
-[🚀 Live Demo](#-quick-start) · [📊 How It Works](#-how-it-works) · [🛠 Tech Stack](#-tech-stack) · [👥 Team](#-the-team) · [📦 Installation](#-installation)
+[📊 How It Works](#-how-it-works) · [🛠 Tech Stack](#-tech-stack) · [👥 Team](#-the-team) · [📦 Installation](#-installation)
 
 </div>
 
@@ -34,28 +34,22 @@
 
 <p align="center">
 
-![LIVE](https://img.shields.io/badge/🚨_LIVE_VERSION-ONLINE-green?style=for-the-badge)
+![OFFLINE](https://img.shields.io/badge/💻_LOCAL_VERSION-PUBLIC_DEMO_OFFLINE-red?style=for-the-badge)
 
 </p>
 
 > [IMPORTANT]
 >
-> This version of Hirer is **currently deployed** and running live via Vercel (frontend) + Render (backend).
+> The live deployment has been taken down as the **Render free tier** has been exhausted. There is no active hosted version of Hirer running right now.
 >
-> **⚠️ Important limitations of the live demo:**
-> - The backend runs on **Render's free tier** — cold starts may take **30–60 seconds** on first load
-> - The live version is **NOT suitable for large datasets** (100K candidates). Free-tier servers have limited RAM and CPU, and processing a full 100K `.jsonl` file **will time out or crash the server**
-> - Semantic scoring (the `all-MiniLM-L6-v2` model) is **disabled** on the live backend to stay within memory limits
-> - For **full functionality** including semantic scoring and large datasets, use the **offline versions** below
->
-> ### 🔽 Want the full experience? Download an offline release:
+> **To use Hirer, you must run it locally.** Download one of the offline releases below:
 >
 > | Version | Tag | Description | Download |
 > |---------|-----|-------------|----------|
 > | **Fullstack Version** *(recommended)* | `V2` | Full pipeline + Next.js frontend + FastAPI backend | [⬇ Download V2](https://github.com/Sidvortex/Hirer/releases/tag/V2) |
 > | **fully processed Backend** | `V1` | Stable CLI pipeline, backend only — no conflicts | [⬇ Download V1](https://github.com/Sidvortex/Hirer/releases/tag/V1) |
 >
-> Run it locally with `./start.sh` — see [Installation](#-installation) below.
+> After downloading, follow the [Installation](#-installation) guide below. Run `./start.sh` to get everything up and going.
 
 ---
 
@@ -222,12 +216,15 @@ Hirer/
 - Node.js 18+
 - npm
 
-### Clone
+### Download a Release
 
-```bash
-git clone https://github.com/Sidvortex/Hirer.git
-cd Hirer
-```
+Go to the [Releases page](https://github.com/Sidvortex/Hirer/releases) and download either:
+- **V2** — Fullstack Version (recommended, includes full UI)
+- **V1** — fully processed Backend (CLI pipeline, stable)
+
+Extract the archive and open a terminal in the project folder.
+
+---
 
 ### Option 1 — Full Stack App (recommended)
 
@@ -358,10 +355,6 @@ Built the frontend interface, presentation slides, project documentation, and su
 </td>
 </tr>
 </table>
-
-<div align="center">
-
-</div>
 
 ---
 
