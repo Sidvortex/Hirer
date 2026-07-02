@@ -3,7 +3,7 @@ __pycache__/
 *.pyc
 .DS_Store
 output/submission.csv
-*.jsonl
+*.json
 *.json.gz
 .ipynb_checkpoints/hirer-frontend/node_modules/
 hirer-frontend/.next/
