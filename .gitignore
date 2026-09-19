@@ -9,3 +9,4 @@ output/submission.csv
 hirer-frontend/.next/
 hirer-backend/venv/
 hirer-backend/__pycache__/
+node_modules/
