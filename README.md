@@ -314,7 +314,7 @@ Top candidates consistently have: NLP/embeddings background, 5-9 years experienc
 
 <table>
 <tr>
-<td align="center" width="33%">
+<td align="center" width="25%">
 
 ### Ravada Siddharth
 **ML Engineer / Lead**
@@ -322,27 +322,28 @@ Top candidates consistently have: NLP/embeddings background, 5-9 years experienc
 B.Tech CSE (Data Science)<br/>
 MUIT Noida · 2023–2027
 
-Built the ranking pipeline, semantic embeddings integration, behavioral scoring system, and full stack web app.
+Built the ranking pipeline, semantic embeddings, behavioral scoring, and full stack web app.
 
 [![GitHub](https://img.shields.io/badge/GitHub-Sidvortex-181717?style=flat&logo=github)](https://github.com/Sidvortex)
 [![Email](https://img.shields.io/badge/Email-ravadasiddharth@gmail.com-EA4335?style=flat&logo=gmail)](mailto:ravadasiddharth@gmail.com)
 
 </td>
-<td align="center" width="33%">
+<td align="center" width="25%">
 
 ### Ishan Gupta
 **Data Engineer**
 
-BCA CSE <br/>
+BCA CSE<br/>
 ITS Ghaziabad · 2023–2026
 
-Worked on feature engineering, data loading pipeline, keyword matching logic, and dataset exploration.
+Worked on feature engineering, data loading pipeline, keyword matching, and dataset exploration.
 
-[![GitHub](https://img.shields.io/badge/GitHub-ishan--gupta-181717?style=flat&logo=github)](https://github.com/IshanGupta-Code)
-[![Email](https://img.shields.io/badge/Email-ishan@example.com-EA4335?style=flat&logo=gmail)](#)
+[![GitHub](https://img.shields.io/badge/GitHub-IshanGupta--Code-181717?style=flat&logo=github)](https://github.com/IshanGupta-Code)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-ishanguptacode-0077B5?style=flat&logo=linkedin)](https://www.linkedin.com/in/ishanguptacode/)
+[![Email](https://img.shields.io/badge/Email-guptaishan6470@gmail.com-EA4335?style=flat&logo=gmail)](mailto:guptaishan6470@gmail.com)
 
 </td>
-<td align="center" width="33%">
+<td align="center" width="25%">
 
 ### Ayush Mishra
 **Frontend / Docs**
@@ -352,8 +353,24 @@ MUIT Noida · 2023–2027
 
 Built the frontend interface, presentation slides, project documentation, and submission materials.
 
-[![GitHub](https://img.shields.io/badge/GitHub-ayush-181717?style=flat&logo=github)](https://github.com/ayush77-pro)
-[![Email](https://img.shields.io/badge/Email-ayush@example.com-EA4335?style=flat&logo=gmail)](#)
+[![GitHub](https://img.shields.io/badge/GitHub-ayush77--pro-181717?style=flat&logo=github)](https://github.com/ayush77-pro)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-ayush--mishra-0077B5?style=flat&logo=linkedin)](https://www.linkedin.com/in/ayush-mishra-53bb99311/)
+[![Email](https://img.shields.io/badge/Email-am8172689@gmail.com-EA4335?style=flat&logo=gmail)](mailto:am8172689@gmail.com)
+
+</td>
+<td align="center" width="25%">
+
+### Vinayak Kapoor
+**Testing & QA**
+
+B.Tech CSE (Data Science)<br/>
+MUIT Noida · 2023–2027
+
+Handled testing, validation of submission outputs, and candidate schema verification.
+
+[![GitHub](https://img.shields.io/badge/GitHub-vinayak605-181717?style=flat&logo=github)](https://github.com/vinayak605)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-vinayak--kapoor-0077B5?style=flat&logo=linkedin)](https://www.linkedin.com/in/vinayak-kapoor-0a47b2380)
+[![Email](https://img.shields.io/badge/Email-vinayakkapoor6605@gmail.com-EA4335?style=flat&logo=gmail)](mailto:vinayakkapoor6605@gmail.com)
 
 </td>
 </tr>
