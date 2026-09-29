@@ -11,3 +11,5 @@ pdfplumber
 pytesseract
 pdf2image
 Pillow
+
+#hi this is just to test  why render cannot detect this file.
