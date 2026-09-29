@@ -8,3 +8,6 @@ scikit-learn
 sentence-transformers
 tqdm
 pdfplumber
+pytesseract
+pdf2image
+Pillow

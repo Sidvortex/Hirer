@@ -319,50 +319,76 @@ if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
 
 
-# ── Limit constants ────────────────────────────────────────────────────────────
-JSONL_ENTRY_LIMIT = 1000   # max candidates from .jsonl on the live server
-PDF_SIZE_LIMIT_MB = 50     # max total ZIP size in MB for bulk PDF
-PDF_COUNT_LIMIT   = 50     # max number of PDFs in a ZIP on the live server
+# ── Limits ─────────────────────────────────────────────────────────────────────
+JSONL_ENTRY_LIMIT = 1000
+PDF_COUNT_LIMIT   = 50
+PDF_SIZE_LIMIT_MB = 50
 
 
-# ── Single PDF resume screening ────────────────────────────────────────────────
+# ── Single PDF / Image resume screening ────────────────────────────────────────
 @app.post("/screen-single")
 async def screen_single_resume(file: UploadFile = File(...)):
-    """Upload 1 PDF resume → get best job matches back."""
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="File must be a PDF")
+    """Upload 1 PDF or image resume → get best job matches."""
+    fname = (file.filename or "").lower()
+    is_pdf   = fname.endswith(".pdf")
+    is_image = fname.endswith((".jpg", ".jpeg", ".png", ".webp"))
+
+    if not (is_pdf or is_image):
+        raise HTTPException(status_code=400, detail="File must be a PDF or image (JPG/PNG)")
 
     try:
-        import pdfplumber
-        from extractor import extract_from_text
+        from extractor import extract_from_text, extract_text_from_pdf, extract_text_from_image
         from feature_engineering import experience_score
     except ImportError as e:
         raise HTTPException(status_code=500, detail=f"Missing dependency: {e}")
 
     contents = await file.read()
-    job_dir = TEMP_DIR / str(uuid.uuid4())
+    job_dir  = TEMP_DIR / str(uuid.uuid4())
     job_dir.mkdir()
-    pdf_path = job_dir / "resume.pdf"
-    with open(pdf_path, "wb") as f:
+    file_path = job_dir / (file.filename or "resume")
+    with open(file_path, "wb") as f:
         f.write(contents)
 
-    try:
-        with pdfplumber.open(str(pdf_path)) as pdf:
-            text = "\n".join(page.extract_text() or "" for page in pdf.pages)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not read PDF: {e}")
+    if is_pdf:
+        text = extract_text_from_pdf(str(file_path))
+    else:
+        text = extract_text_from_image(str(file_path))
 
     if not text.strip():
-        raise HTTPException(status_code=400, detail="PDF has no extractable text. Is it a scanned image?")
+        raise HTTPException(status_code=400, detail="Could not extract text. If this is a scanned PDF, make sure Tesseract is installed on the server.")
 
-    candidate = extract_from_text(text, file.filename or "resume.pdf")
+    candidate = extract_from_text(text, file.filename or "resume")
 
-    JOB_DESCRIPTIONS = [
-        {"id": 1, "title": "Senior AI Engineer",   "company": "Redrob AI",      "keywords": ["embeddings","vector database","nlp","llm","python","semantic search","faiss","ranking","ndcg","transformer"]},
-        {"id": 2, "title": "ML Platform Engineer", "company": "FinTech Corp",    "keywords": ["mlops","kubernetes","pytorch","spark","docker","pipeline","infrastructure","airflow"]},
-        {"id": 3, "title": "NLP Researcher",        "company": "AI Labs India",  "keywords": ["nlp","bert","transformers","research","publications","language model","linguistics"]},
-        {"id": 4, "title": "Data Scientist",        "company": "Flipkart",       "keywords": ["xgboost","sql","analytics","python","statistics","a/b testing","pandas","visualization"]},
-        {"id": 5, "title": "Backend Engineer",      "company": "Startup",        "keywords": ["python","fastapi","postgresql","redis","rest api","docker","microservices","api"]},
+    # Extended job descriptions for resume mode
+    JD_LIST = [
+        # AI / ML
+        {"id":1,  "domain":"AI/ML",       "title":"Senior AI Engineer",        "company":"Redrob AI",          "keywords":["embeddings","vector database","nlp","llm","python","semantic search","faiss","ranking","ndcg","transformer"]},
+        {"id":2,  "domain":"AI/ML",       "title":"ML Platform Engineer",      "company":"FinTech Corp",        "keywords":["mlops","kubernetes","pytorch","spark","docker","pipeline","infrastructure","airflow"]},
+        {"id":3,  "domain":"AI/ML",       "title":"NLP Researcher",            "company":"AI Labs India",       "keywords":["nlp","bert","transformers","research","publications","language model"]},
+        {"id":4,  "domain":"Data",        "title":"Data Scientist",            "company":"Flipkart",            "keywords":["xgboost","sql","analytics","python","statistics","a/b testing","pandas","visualization"]},
+        {"id":5,  "domain":"Backend",     "title":"Backend Engineer",          "company":"Startup",             "keywords":["python","fastapi","postgresql","redis","rest api","docker","microservices"]},
+        # Frontend / Mobile
+        {"id":6,  "domain":"Frontend",    "title":"Frontend Developer",        "company":"SaaS Co",             "keywords":["react","javascript","typescript","css","html","next.js","ui","tailwind","figma"]},
+        {"id":7,  "domain":"Mobile",      "title":"Android Developer",         "company":"App Studio",          "keywords":["android","kotlin","java","jetpack","firebase","mobile","gradle","xml"]},
+        {"id":8,  "domain":"Mobile",      "title":"iOS Developer",             "company":"Product Co",          "keywords":["ios","swift","xcode","swiftui","objective-c","apple","mobile"]},
+        {"id":9,  "domain":"Mobile",      "title":"Flutter Developer",         "company":"Agency",              "keywords":["flutter","dart","android","ios","firebase","mobile","cross-platform"]},
+        # DevOps / Cloud
+        {"id":10, "domain":"DevOps",      "title":"DevOps Engineer",           "company":"Cloud Corp",          "keywords":["docker","kubernetes","aws","gcp","azure","ci/cd","terraform","jenkins","linux","bash"]},
+        {"id":11, "domain":"DevOps",      "title":"Cloud Architect",           "company":"Enterprise Co",       "keywords":["aws","gcp","azure","cloud","architecture","microservices","terraform","security"]},
+        {"id":12, "domain":"DevOps",      "title":"Site Reliability Engineer", "company":"Tech Giant",          "keywords":["sre","kubernetes","monitoring","prometheus","grafana","linux","on-call","reliability"]},
+        # Full Stack
+        {"id":13, "domain":"Fullstack",   "title":"Full Stack Developer",      "company":"Startup",             "keywords":["react","node.js","python","postgresql","rest api","docker","javascript","typescript"]},
+        # Data Engineering
+        {"id":14, "domain":"Data",        "title":"Data Engineer",             "company":"Analytics Co",        "keywords":["spark","airflow","dbt","sql","python","etl","pipeline","kafka","data warehouse"]},
+        {"id":15, "domain":"Data",        "title":"Business Analyst",          "company":"Consulting",          "keywords":["sql","excel","tableau","power bi","analytics","requirements","stakeholder","data analysis"]},
+        # Cybersecurity
+        {"id":16, "domain":"Security",    "title":"Cybersecurity Analyst",     "company":"SecureNet",           "keywords":["security","penetration testing","vulnerability","firewall","siem","compliance","linux","python"]},
+        # Product / Design
+        {"id":17, "domain":"Product",     "title":"Product Manager",           "company":"Product Co",          "keywords":["product management","roadmap","agile","scrum","user research","metrics","stakeholder","jira"]},
+        {"id":18, "domain":"Design",      "title":"UI/UX Designer",            "company":"Design Studio",       "keywords":["figma","ui","ux","user research","wireframe","prototype","design system","adobe"]},
+        # Finance / Non-tech
+        {"id":19, "domain":"Finance",     "title":"Financial Analyst",         "company":"Finance Corp",        "keywords":["finance","excel","financial modeling","accounting","sql","valuation","reporting","cfa"]},
+        {"id":20, "domain":"Marketing",   "title":"Digital Marketing Manager", "company":"Brand Co",            "keywords":["marketing","seo","content","social media","analytics","campaign","brand","google ads"]},
     ]
 
     import numpy as np
@@ -375,17 +401,18 @@ async def screen_single_resume(file: UploadFile = File(...)):
     ]).lower()
 
     results = []
-    for jd in JOB_DESCRIPTIONS:
+    for jd in JD_LIST:
         kw_hits = sum(1 for kw in jd["keywords"] if kw in candidate_text)
         kw_score = kw_hits / len(jd["keywords"])
         exp_s = experience_score(candidate)
         combined = min(kw_score * 0.65 + exp_s * 0.25 + 0.10, 0.99)
         results.append({
-            "job_id": jd["id"],
-            "job_title": jd["title"],
-            "company": jd["company"],
-            "match_score": round(combined, 3),
-            "keyword_hits": kw_hits,
+            "job_id":         jd["id"],
+            "domain":         jd["domain"],
+            "job_title":      jd["title"],
+            "company":        jd["company"],
+            "match_score":    round(combined, 3),
+            "keyword_hits":   kw_hits,
             "total_keywords": len(jd["keywords"]),
             "recommendation": "Strong match" if combined > 0.6 else "Good match" if combined > 0.4 else "Partial match",
         })
@@ -394,173 +421,138 @@ async def screen_single_resume(file: UploadFile = File(...)):
 
     return {
         "candidate": {
-            "name": candidate["profile"]["name"],
-            "current_title": candidate["profile"]["current_title"],
+            "name":                candidate["profile"]["name"],
+            "current_title":       candidate["profile"]["current_title"],
             "years_of_experience": candidate["profile"]["years_of_experience"],
-            "skills_found": [s["name"] for s in candidate["skills"][:10]],
-            "location": candidate["profile"]["location"],
+            "skills_found":        [s["name"] for s in candidate["skills"][:12]],
+            "location":            candidate["profile"]["location"],
+            "industry":            candidate["profile"]["current_industry"],
         },
         "job_matches": results,
-        "best_match": results[0]["job_title"] if results else None,
+        "best_match":  results[0]["job_title"] if results else None,
+        "top_domain":  results[0]["domain"]    if results else None,
     }
 
 
-# ── Bulk PDF ZIP screening ─────────────────────────────────────────────────────
+# ── Bulk PDF ZIP screening ──────────────────────────────────────────────────────
 @app.post("/screen-bulk")
 async def screen_bulk_resumes(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    skill_weight: float = Form(0.40),
-    semantic_weight: float = Form(0.35),
+    skill_weight:      float = Form(0.40),
+    semantic_weight:   float = Form(0.35),
     behavioral_weight: float = Form(0.25),
-    top_n: int = Form(50),
+    top_n:             int   = Form(50),
 ):
-    """Upload a ZIP of PDF resumes → extract → rank. Returns job_id to poll."""
-    if not file.filename or not file.filename.lower().endswith(".zip"):
-        raise HTTPException(status_code=400, detail="File must be a .zip of PDF resumes")
+    """Upload a ZIP of PDF/image resumes → extract → rank. Poll /status/{job_id}."""
+    if not (file.filename or "").lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="File must be a .zip")
 
-    total = round(skill_weight + semantic_weight + behavioral_weight, 2)
-    if abs(total - 1.0) > 0.01:
-        raise HTTPException(status_code=400, detail=f"Weights must sum to 1.0, got {total}")
-
-    job_id = str(uuid.uuid4())
-    job_dir = TEMP_DIR / job_id
-    job_dir.mkdir()
-
-    zip_path = job_dir / "resumes.zip"
-    output_path = job_dir / "submission.csv"
+    total_w = round(skill_weight + semantic_weight + behavioral_weight, 2)
+    if abs(total_w - 1.0) > 0.01:
+        raise HTTPException(status_code=400, detail=f"Weights must sum to 1.0, got {total_w}")
 
     contents = await file.read()
-
-    # size check
-    size_mb = len(contents) / (1024 * 1024)
+    size_mb  = len(contents) / (1024 * 1024)
     if size_mb > PDF_SIZE_LIMIT_MB:
-        raise HTTPException(status_code=400, detail=f"ZIP too large ({size_mb:.1f}MB). Live server limit is {PDF_SIZE_LIMIT_MB}MB.")
+        raise HTTPException(status_code=400, detail=f"ZIP too large ({size_mb:.1f} MB). Live limit is {PDF_SIZE_LIMIT_MB} MB.")
+
+    job_id      = str(uuid.uuid4())
+    job_dir     = TEMP_DIR / job_id
+    job_dir.mkdir()
+    zip_path    = job_dir / "resumes.zip"
+    output_path = job_dir / "submission.csv"
 
     with open(zip_path, "wb") as f:
         f.write(contents)
 
-    JOBS[job_id] = {
-        "status": "running",
-        "step": "Queued...",
-        "pct": 0,
-        "steps": [],
-        "output": str(output_path),
-        "total_candidates": 0,
-        "error": None,
-        "result": None,
-    }
+    JOBS[job_id] = {"status":"running","step":"Queued...","pct":0,"output":str(output_path),"total_candidates":0,"error":None}
 
     background_tasks.add_task(
-        run_bulk_pdf_job,
+        _run_bulk_pdf,
         job_id, str(zip_path), str(output_path),
         skill_weight, semantic_weight, behavioral_weight, top_n
     )
-
     return {"job_id": job_id, "status": "running"}
 
 
-def _update_bulk(job_id: str, step: str, pct: int):
-    job = JOBS.get(job_id)
-    if not job: return
-    job["step"] = step
-    job["pct"] = pct
-    job["steps"].append(step)
+def _upd(job_id, step, pct, status="running"):
+    if job_id in JOBS:
+        JOBS[job_id].update({"step": step, "pct": pct, "status": status})
 
 
-def run_bulk_pdf_job(job_id, zip_path, output_path, skill_weight, semantic_weight, behavioral_weight, top_n):
+def _run_bulk_pdf(job_id, zip_path, output_path, w1, w2, w3, top_n):
     try:
-        import zipfile, pdfplumber, pandas as pd, numpy as np
-        from extractor import extract_from_text
+        import zipfile, pandas as pd, numpy as np
+        from extractor import extract_from_text, extract_text_from_pdf, extract_text_from_image
         from utils import normalize_0_1
         from feature_engineering import get_features, MUST_HAVE_SKILLS, _get_full_text
 
-        _update_bulk(job_id, "Opening ZIP...", 5)
+        _upd(job_id, "Opening ZIP...", 5)
 
+        SUPPORTED = (".pdf", ".jpg", ".jpeg", ".png", ".webp")
         candidates = []
+
         with zipfile.ZipFile(zip_path, "r") as z:
-            pdf_files = [f for f in z.namelist() if f.lower().endswith(".pdf") and not f.startswith("__")]
+            files = [f for f in z.namelist()
+                     if any(f.lower().endswith(ext) for ext in SUPPORTED)
+                     and not f.startswith("__")]
 
-            # enforce PDF count limit
-            if len(pdf_files) > PDF_COUNT_LIMIT:
-                pdf_files = pdf_files[:PDF_COUNT_LIMIT]
-                _update_bulk(job_id, f"Capped to {PDF_COUNT_LIMIT} PDFs (live server limit)", 6)
+            if len(files) > PDF_COUNT_LIMIT:
+                files = files[:PDF_COUNT_LIMIT]
+                _upd(job_id, f"Capped to {PDF_COUNT_LIMIT} files (live server limit)", 6)
 
-            total = len(pdf_files)
-            JOBS[job_id]["total_candidates"] = total
+            JOBS[job_id]["total_candidates"] = len(files)
+            tmp = Path(zip_path).parent / "files"
+            tmp.mkdir(exist_ok=True)
 
-            tmp_dir = Path(zip_path).parent / "pdfs"
-            tmp_dir.mkdir(exist_ok=True)
-
-            for i, pdf_name in enumerate(pdf_files):
+            for i, fname in enumerate(files):
                 try:
-                    pdf_bytes = z.read(pdf_name)
-                    pdf_path = tmp_dir / f"{i}.pdf"
-                    with open(pdf_path, "wb") as f:
-                        f.write(pdf_bytes)
-                    with pdfplumber.open(str(pdf_path)) as pdf:
-                        text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+                    data = z.read(fname)
+                    fpath = tmp / f"{i}{Path(fname).suffix}"
+                    with open(fpath, "wb") as f:
+                        f.write(data)
+                    if fname.lower().endswith(".pdf"):
+                        text = extract_text_from_pdf(str(fpath))
+                    else:
+                        text = extract_text_from_image(str(fpath))
                     if text.strip():
-                        c = extract_from_text(text, pdf_name)
-                        candidates.append(c)
+                        candidates.append(extract_from_text(text, fname))
                 except Exception:
                     pass
-                pct = 5 + int((i / total) * 45)
-                _update_bulk(job_id, f"Extracted {i+1}/{total} resumes...", pct)
+                _upd(job_id, f"Extracted {i+1}/{len(files)} files...", 5 + int((i/len(files))*45))
 
         if not candidates:
-            raise ValueError("Could not extract text from any PDF. They may be scanned images.")
+            raise ValueError("Could not extract text from any file.")
 
-        _update_bulk(job_id, f"Extracted {len(candidates)} resumes. Scoring...", 55)
+        _upd(job_id, f"Extracted {len(candidates)} resumes. Scoring...", 55)
+        feat_df = pd.DataFrame([get_features(c) for c in candidates])
 
-        feature_rows = [get_features(c) for c in candidates]
-        feat_df = pd.DataFrame(feature_rows)
+        combined_skill = (feat_df["skill_score"]*0.5 + feat_df["experience_score"]*0.25 +
+                          feat_df["title_score"]*0.15 + feat_df["education_score"]*0.10)
 
-        combined_skill = (
-            feat_df["skill_score"] * 0.5 +
-            feat_df["experience_score"] * 0.25 +
-            feat_df["title_score"] * 0.15 +
-            feat_df["education_score"] * 0.10
-        )
+        _upd(job_id, "Combining scores...", 80)
+        final_scores = (w1 * normalize_0_1(combined_skill.values) +
+                        w2 * normalize_0_1(np.array([0.5]*len(candidates))) +
+                        w3 * normalize_0_1(feat_df["behavioral_score"].values))
 
-        _update_bulk(job_id, "Computing behavioral signals...", 72)
-        behavioral_arr = feat_df["behavioral_score"].values
-        semantic_arr = np.array([0.5] * len(candidates))
-
-        _update_bulk(job_id, "Ranking candidates...", 85)
-        final_scores = (
-            skill_weight * normalize_0_1(combined_skill.values) +
-            semantic_weight * normalize_0_1(semantic_arr) +
-            behavioral_weight * normalize_0_1(behavioral_arr)
-        )
-
-        sorted_idx = np.argsort(-final_scores)
-        top_idx = sorted_idx[:top_n]
-
+        top_idx = np.argsort(-final_scores)[:top_n]
         rows = []
-        for rank, idx in enumerate(top_idx, start=1):
+        for rank, idx in enumerate(top_idx, 1):
             c = candidates[idx]
-            text = _get_full_text(c).lower()
-            skill_hits = sum(1 for kw in MUST_HAVE_SKILLS if kw in text)
             p = c.get("profile", {})
+            skill_hits = sum(1 for kw in MUST_HAVE_SKILLS if kw in _get_full_text(c).lower())
             rows.append({
                 "candidate_id": c["candidate_id"],
-                "name": p.get("name", "Unknown"),
-                "rank": rank,
-                "score": round(float(final_scores[idx]), 4),
-                "reasoning": f"{p.get('current_title','?')} with {p.get('years_of_experience',0):.1f} yrs exp; {skill_hits} JD skill matches.",
-                "source_file": c.get("_source_file", ""),
+                "name":         p.get("name", "Unknown"),
+                "rank":         rank,
+                "score":        round(float(final_scores[idx]), 4),
+                "reasoning":    f"{p.get('current_title','?')} with {p.get('years_of_experience',0):.1f} yrs exp; {skill_hits} JD skill matches.",
+                "source_file":  c.get("_source_file", ""),
             })
 
         pd.DataFrame(rows).to_csv(output_path, index=False)
-
-        JOBS[job_id]["status"] = "done"
-        JOBS[job_id]["pct"] = 100
-        JOBS[job_id]["step"] = "Done!"
-        JOBS[job_id]["steps"].append("Done!")
-        JOBS[job_id]["result"] = {"job_id": job_id, "total_candidates": len(candidates), "ranked": len(rows)}
+        _upd(job_id, "Done!", 100, "done")
 
     except Exception as e:
-        JOBS[job_id]["status"] = "error"
-        JOBS[job_id]["error"] = str(e)
-        JOBS[job_id]["step"] = f"Error: {str(e)}"
+        JOBS[job_id].update({"status":"error","error":str(e),"step":f"Error: {e}"})

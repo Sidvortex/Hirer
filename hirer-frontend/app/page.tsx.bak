@@ -8,41 +8,19 @@ import RadialOrbitalTimeline from "@/components/ui/radial-orbital-timeline";
 import LoadingPage from "@/components/ui/loading-page";
 import DisplayCards from "@/components/ui/display-cards";
 import NotFound1 from "@/components/ui/8bit-not-found1";
-import { Briefcase, Code, Search, BarChart2, Brain, Sparkles, Upload, GitBranch, ExternalLink, Mail, FileText, Archive, Database, AlertTriangle, Loader2 } from "lucide-react";
+import { Briefcase, Code, Search, BarChart2, Brain, Sparkles, Upload, GitBranch, ExternalLink, Mail } from "lucide-react";
 
+// Backend base URL — set NEXT_PUBLIC_API_URL in .env.local for dev and in
+// your Vercel project settings for production (e.g. https://your-api.up.railway.app)
 const API = process.env.NEXT_PUBLIC_API_URL!;
 
-// Live server limits
-const JSONL_LIMIT = 1000;
-const PDF_LIMIT   = 50;
-
-type Screen = "boot" | "home" | "mode-select" | "select" | "loading" | "results" | "single-upload" | "single-result" | "about" | "error";
-type UploadMode = "jsonl" | "single-pdf" | "bulk-pdf";
+type Screen = "boot" | "home" | "select" | "loading" | "results" | "about" | "error";
 
 interface Candidate {
   candidate_id: string;
   rank: number;
   score: number;
   reasoning: string;
-  name?: string;
-}
-
-interface JobMatch {
-  job_id: number;
-  domain: string;
-  job_title: string;
-  company: string;
-  match_score: number;
-  keyword_hits: number;
-  total_keywords: number;
-  recommendation: string;
-}
-
-interface SingleResult {
-  candidate: { name: string; current_title: string; years_of_experience: number; skills_found: string[]; location: string; industry: string; };
-  job_matches: JobMatch[];
-  best_match: string;
-  top_domain: string;
 }
 
 // ─── Job data for radial timeline ─────────────────────────────────────────────
@@ -107,10 +85,6 @@ function reScoreForJob(results: Candidate[], jobId: number): Candidate[] {
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 function BootScreen({ onDone }: { onDone: () => void }) {
-  // silently wake up the Render backend while the animation plays
-  useEffect(() => {
-    fetch(`${API}/health`).catch(() => {});
-  }, []);
   return (
     <div className="min-h-screen bg-black flex items-center justify-center relative">
       <HandWrittenTitle title="Hirer" subtitle="Candidate Ranking System" />
@@ -132,53 +106,6 @@ function BootScreen({ onDone }: { onDone: () => void }) {
 }
 
 // ─── Home ─────────────────────────────────────────────────────────────────────
-// ─── Mode Select ──────────────────────────────────────────────────────────────
-function ModeSelectScreen({ onSelect, onBack }: { onSelect: (mode: UploadMode) => void; onBack: () => void }) {
-  const modes = [
-    { id:"jsonl" as UploadMode,     icon:Database, title:"Bulk JSON Ranking",  desc:"Upload candidates.jsonl with structured profiles. Rank up to 100K candidates.",      tag:"Challenge Format", limit:`⚠ Live server: max ${JSONL_LIMIT.toLocaleString()} entries`,              color:"border-blue-500/30 hover:border-blue-400" },
-    { id:"single-pdf" as UploadMode,icon:FileText, title:"Single Resume",      desc:"Upload one PDF or image resume. Get ranked job matches across 20 role categories.",  tag:"For Job Seekers",  limit:null,                                                                    color:"border-green-500/30 hover:border-green-400" },
-    { id:"bulk-pdf" as UploadMode,  icon:Archive,  title:"Bulk Resume ZIP",    desc:"Upload a ZIP of PDF or image resumes. Auto-extract info and rank all candidates.",   tag:"For Recruiters",   limit:`⚠ Live server: max ${PDF_LIMIT} files per ZIP (50 MB)`,                color:"border-purple-500/30 hover:border-purple-400" },
-  ];
-  return (
-    <div className="min-h-screen bg-neutral-950 text-white flex items-center justify-center px-6">
-      <div className="max-w-3xl w-full">
-        <motion.div initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }} className="mb-12">
-          <button onClick={onBack} className="font-mono text-xs text-white/30 hover:text-white transition-colors mb-6 block">← back</button>
-          <h1 className="font-handwritten text-6xl text-white mb-2">Choose your mode</h1>
-          <p className="font-mono text-xs text-white/30 tracking-widest">SELECT HOW YOU WANT TO USE HIRER</p>
-        </motion.div>
-        <div className="grid gap-4">
-          {modes.map((mode, i) => (
-            <motion.button key={mode.id} initial={{ opacity:0, x:-20 }} animate={{ opacity:1, x:0 }} transition={{ delay:i*0.1 }}
-              onClick={() => onSelect(mode.id)}
-              className={`border ${mode.color} bg-white/5 p-6 text-left transition-all duration-200 hover:bg-white/10 group`}>
-              <div className="flex items-start gap-4">
-                <div className="w-10 h-10 rounded-full border border-white/20 flex items-center justify-center flex-shrink-0 group-hover:border-white/50 transition-colors">
-                  <mode.icon size={18} className="text-white/60 group-hover:text-white transition-colors" />
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-1">
-                    <span className="font-mono text-sm text-white">{mode.title}</span>
-                    <span className="font-mono text-[10px] text-white/30 border border-white/10 px-2 py-0.5">{mode.tag}</span>
-                  </div>
-                  <p className="font-mono text-xs text-white/40 leading-relaxed mb-2">{mode.desc}</p>
-                  {mode.limit && (
-                    <div className="flex items-center gap-1.5">
-                      <AlertTriangle size={10} className="text-yellow-500/70" />
-                      <span className="font-mono text-[10px] text-yellow-500/70">{mode.limit}</span>
-                    </div>
-                  )}
-                </div>
-                <span className="text-white/20 group-hover:text-white transition-colors font-mono text-lg mt-1">→</span>
-              </div>
-            </motion.button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function HomeScreen({ onStart, onAbout }: { onStart: () => void; onAbout: () => void }) {
   return (
     <div className="relative">
@@ -195,69 +122,47 @@ function HomeScreen({ onStart, onAbout }: { onStart: () => void; onAbout: () => 
 
 // ─── Select ───────────────────────────────────────────────────────────────────
 function SelectScreen({
-  mode,
   onRun,
-  onBack,
 }: {
-  mode: UploadMode;
   onRun: (file: File, w1: number, w2: number, w3: number, topN: number, semantic: boolean) => void;
-  onBack: () => void;
 }) {
   const [w1, setW1] = useState(40);
   const [w2, setW2] = useState(35);
   const [w3, setW3] = useState(25);
-  const [topN, setTopN] = useState(mode === "bulk-pdf" ? 50 : 100);
+  const [topN, setTopN] = useState(100);
   const [semantic, setSemantic] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const total = w1 + w2 + w3;
 
-  const accept    = mode === "bulk-pdf" ? ".zip" : ".jsonl,.json";
-  const dropLabel = mode === "bulk-pdf"
-    ? "drop ZIP of PDF / image resumes here or click to browse"
-    : "drop candidates.jsonl here or click to browse";
-
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
     const f = e.dataTransfer.files[0];
-    if (f) setFile(f);
+    if (f && (f.name.endsWith(".jsonl") || f.name.endsWith(".json"))) {
+      setFile(f);
+    } else {
+      alert("Please upload a .jsonl or .json file");
+    }
   };
 
   return (
     <div className="min-h-screen bg-black text-white relative overflow-hidden">
-      <div className="absolute top-4 left-4 z-30">
-        <button onClick={onBack} className="font-mono text-xs text-white/30 hover:text-white transition-colors">← back</button>
-      </div>
+      {/* Background label */}
       <div className="absolute top-6 left-1/2 -translate-x-1/2 z-10 font-mono text-xs text-white/20 tracking-widest">
         CLICK A JOB TO SELECT IT
       </div>
+
+      {/* Radial job selector fills the screen */}
       <div className="absolute inset-0 z-0 pb-64">
         <RadialOrbitalTimeline timelineData={JOB_DATA} />
       </div>
+
+      {/* Config panel at bottom */}
       <div className="absolute bottom-0 left-0 right-0 z-20 bg-black/90 backdrop-blur-md border-t border-white/10 p-4">
         <div className="max-w-3xl mx-auto space-y-3">
-
-          {/* live server limit warnings */}
-          {mode === "jsonl" && (
-            <div className="flex items-center gap-2 border border-yellow-500/20 bg-yellow-500/5 px-3 py-2">
-              <AlertTriangle size={11} className="text-yellow-500/70 flex-shrink-0" />
-              <span className="font-mono text-[10px] text-yellow-500/70">
-                Live server limit: {JSONL_LIMIT.toLocaleString()} entries max. No limit for local runs.
-              </span>
-            </div>
-          )}
-          {mode === "bulk-pdf" && (
-            <div className="flex items-center gap-2 border border-yellow-500/20 bg-yellow-500/5 px-3 py-2">
-              <AlertTriangle size={11} className="text-yellow-500/70 flex-shrink-0" />
-              <span className="font-mono text-[10px] text-yellow-500/70">
-                Live server limit: {PDF_LIMIT} files max per ZIP, 50 MB max size. No limit for local runs.
-              </span>
-            </div>
-          )}
-
-          {/* file upload */}
+          {/* File upload */}
           <div
             className={`border ${dragOver ? "border-white/60 bg-white/5" : file ? "border-white/40" : "border-white/15"} transition-colors p-3 text-center cursor-pointer`}
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -265,11 +170,11 @@ function SelectScreen({
             onDrop={handleDrop}
             onClick={() => fileRef.current?.click()}
           >
-            <input ref={fileRef} type="file" accept={accept} className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setFile(f); }} />
+            <input ref={fileRef} type="file" accept=".jsonl,.json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setFile(f); }} />
             <div className="flex items-center justify-center gap-2 text-white/50">
               <Upload size={12} />
               <span className="font-mono text-xs">
-                {file ? `✓ ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)` : dropLabel}
+                {file ? `✓ ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)` : "drop candidates.jsonl here or click to browse"}
               </span>
             </div>
           </div>
@@ -317,150 +222,12 @@ function SelectScreen({
   );
 }
 
-// ─── Single PDF / Image Upload ─────────────────────────────────────────────────
-function SinglePDFScreen({ onResult, onBack, onError }: {
-  onResult: (data: SingleResult) => void;
-  onBack: () => void;
-  onError: (msg: string) => void;
-}) {
-  const [file, setFile]       = useState<File | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const handleSubmit = async () => {
-    if (!file) return;
-    setLoading(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch(`${API}/screen-single`, { method: "POST", body: fd });
-      if (!res.ok) { const err = await res.json(); onError(err.detail || "Failed"); return; }
-      onResult(await res.json());
-    } catch (e: unknown) {
-      onError(e instanceof Error ? e.message : "Cannot connect to backend");
-    } finally { setLoading(false); }
-  };
-
-  return (
-    <div className="min-h-screen bg-neutral-950 text-white flex items-center justify-center px-6">
-      <div className="max-w-lg w-full">
-        <button onClick={onBack} className="font-mono text-xs text-white/30 hover:text-white transition-colors mb-8 block">← back</button>
-        <motion.div initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }}>
-          <h2 className="font-handwritten text-5xl text-white mb-2">Upload your resume</h2>
-          <p className="font-mono text-xs text-white/30 mb-2 tracking-widest">WE'LL MATCH YOU AGAINST 20 JOB ROLES</p>
-          <p className="font-mono text-[10px] text-white/20 mb-8">Supports PDF, JPG, PNG — including scanned resumes</p>
-          <div
-            className={`border-2 border-dashed ${dragOver ? "border-white/60 bg-white/5" : file ? "border-white/40" : "border-white/15"} transition-colors p-12 text-center cursor-pointer mb-6`}
-            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) setFile(f); }}
-            onClick={() => fileRef.current?.click()}
-          >
-            <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setFile(f); }} />
-            <FileText size={32} className="mx-auto mb-4 text-white/30" />
-            <p className="font-mono text-xs text-white/50">
-              {file ? `✓ ${file.name} (${(file.size/1024/1024).toFixed(1)}MB)` : "drop your resume here or click to browse"}
-            </p>
-            <p className="font-mono text-[10px] text-white/20 mt-2">PDF · JPG · PNG · WEBP</p>
-          </div>
-          <button
-            onClick={handleSubmit}
-            disabled={!file || loading}
-            className="w-full bg-white text-black font-mono text-sm py-3 hover:bg-white/90 disabled:opacity-25 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
-          >
-            {loading ? <><Loader2 size={14} className="animate-spin" /> Analyzing resume...</> : !file ? "↑ UPLOAD YOUR RESUME FIRST" : "FIND MY BEST JOB MATCH →"}
-          </button>
-        </motion.div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Single Result ─────────────────────────────────────────────────────────────
-function SingleResultScreen({ result, onBack }: { result: SingleResult; onBack: () => void }) {
-  const c = result.candidate;
-  const [filter, setFilter] = useState<string>("All");
-  const domains = ["All", ...Array.from(new Set(result.job_matches.map(j => j.domain)))];
-  const shown = filter === "All" ? result.job_matches : result.job_matches.filter(j => j.domain === filter);
-
-  return (
-    <div className="min-h-screen bg-neutral-950 text-white">
-      <div className="border-b border-white/10 px-6 py-4 flex items-center justify-between sticky top-0 bg-neutral-950/90 backdrop-blur z-30">
-        <button onClick={onBack} className="font-mono text-xs text-white/40 hover:text-white transition-colors">← try another</button>
-        <h1 className="font-mono text-sm text-white/70 tracking-widest">JOB MATCH RESULTS</h1>
-        <div className="w-24" />
-      </div>
-      <div className="max-w-2xl mx-auto px-6 py-8">
-
-        {/* Candidate card */}
-        <motion.div initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }} className="border border-white/10 p-6 mb-6">
-          <h2 className="font-handwritten text-4xl text-white mb-1">{c.name}</h2>
-          <p className="font-mono text-xs text-white/50 mb-1">{c.current_title} · {c.years_of_experience.toFixed(1)} yrs · {c.industry}</p>
-          {c.location && <p className="font-mono text-[10px] text-white/30 mb-3">{c.location}</p>}
-          <div className="flex flex-wrap gap-2">
-            {c.skills_found.map(s => (<span key={s} className="font-mono text-[10px] border border-white/15 text-white/50 px-2 py-1">{s}</span>))}
-          </div>
-        </motion.div>
-
-        {/* Best match */}
-        <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} transition={{ delay:0.2 }} className="border border-green-500/30 bg-green-500/5 p-4 mb-6 flex items-center gap-3">
-          <Sparkles size={16} className="text-green-400 flex-shrink-0" />
-          <div>
-            <p className="font-mono text-xs text-green-400">BEST MATCH</p>
-            <p className="font-mono text-sm text-white">{result.best_match}</p>
-            <p className="font-mono text-[10px] text-white/30">{result.top_domain}</p>
-          </div>
-          <div className="ml-auto font-mono text-2xl text-green-400 font-bold">
-            {(result.job_matches[0]?.match_score * 100).toFixed(0)}%
-          </div>
-        </motion.div>
-
-        {/* Domain filter */}
-        <div className="flex gap-2 flex-wrap mb-4">
-          {domains.map(d => (
-            <button key={d} onClick={() => setFilter(d)}
-              className={`font-mono text-[10px] px-3 py-1 border transition-colors ${filter===d ? "border-white text-white" : "border-white/15 text-white/30 hover:border-white/40"}`}>
-              {d}
-            </button>
-          ))}
-        </div>
-
-        {/* All job matches */}
-        <p className="font-mono text-[10px] text-white/25 mb-3 tracking-widest">ALL JOB MATCHES ({shown.length})</p>
-        <div className="space-y-3">
-          {shown.map((job, i) => (
-            <motion.div key={job.job_id} initial={{ opacity:0, x:-10 }} animate={{ opacity:1, x:0 }} transition={{ delay:0.05*i }}
-              className="border border-white/10 p-4 hover:border-white/25 transition-colors">
-              <div className="flex items-center justify-between mb-2">
-                <div>
-                  <span className="font-mono text-[10px] text-white/30 border border-white/10 px-1.5 py-0.5 mr-2">{job.domain}</span>
-                  <span className="font-mono text-sm text-white">{job.job_title}</span>
-                  <span className="font-mono text-xs text-white/30 ml-2">@ {job.company}</span>
-                </div>
-                <div className="text-right flex-shrink-0 ml-3">
-                  <div className="font-mono text-lg text-white">{(job.match_score*100).toFixed(0)}%</div>
-                  <div className={`font-mono text-[10px] ${job.recommendation==="Strong match"?"text-green-400":job.recommendation==="Good match"?"text-yellow-400":"text-white/30"}`}>{job.recommendation}</div>
-                </div>
-              </div>
-              <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
-                <div className="h-full bg-white/60 rounded-full" style={{ width:`${job.match_score*100}%` }} />
-              </div>
-              <p className="font-mono text-[10px] text-white/30 mt-2">{job.keyword_hits}/{job.total_keywords} keywords matched</p>
-            </motion.div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Loading ───────────────────────────────────────────────────────────────────
 function RealLoadingScreen({
-  file, w1, w2, w3, topN, semantic, mode,
+  file, w1, w2, w3, topN, semantic,
   onDone, onError,
 }: {
-  file: File; w1: number; w2: number; w3: number; topN: number; semantic: boolean; mode: UploadMode;
+  file: File; w1: number; w2: number; w3: number; topN: number; semantic: boolean;
   onDone: (jobId: string, results: Candidate[]) => void;
   onError: (msg: string) => void;
 }) {
@@ -482,9 +249,8 @@ function RealLoadingScreen({
       formData.append("use_semantic", String(semantic));
 
       try {
-        // kick off the job — returns job_id immediately
-        const endpoint = mode === "bulk-pdf" ? `${API}/screen-bulk` : `${API}/rank`;
-        const res = await fetch(endpoint, { method: "POST", body: formData });
+        // 1. kick off the job — backend returns immediately with a job_id
+        const res = await fetch(`${API}/rank`, { method: "POST", body: formData });
         if (!res.ok) { const err = await res.json(); onError(err.detail || "Server error"); return; }
         const { job_id: jobId } = await res.json();
 
@@ -714,13 +480,11 @@ function ErrorScreen({ message, onHome }: { message: string; onHome: () => void 
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 export default function Home() {
-  const [screen, setScreen]           = useState<Screen>("boot");
-  const [mode, setMode]               = useState<UploadMode>("jsonl");
-  const [results, setResults]         = useState<Candidate[]>([]);
-  const [jobId, setJobId]             = useState("");
-  const [errorMsg, setErrorMsg]       = useState("");
-  const [prevScreen, setPrevScreen]   = useState<Screen>("home");
-  const [singleResult, setSingleResult] = useState<SingleResult | null>(null);
+  const [screen, setScreen] = useState<Screen>("boot");
+  const [results, setResults] = useState<Candidate[]>([]);
+  const [jobId, setJobId] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [prevScreen, setPrevScreen] = useState<Screen>("home");
   const [uploadState, setUploadState] = useState<{
     file: File; w1: number; w2: number; w3: number; topN: number; semantic: boolean;
   } | null>(null);
@@ -733,12 +497,7 @@ export default function Home() {
   }, [screen]);
 
   const goAbout = () => { setPrevScreen(screen); setScreen("about"); };
-  const goBack  = () => setScreen(prevScreen);
-
-  const handleModeSelect = (m: UploadMode) => {
-    setMode(m);
-    setScreen(m === "single-pdf" ? "single-upload" : "select");
-  };
+  const goBack = () => setScreen(prevScreen);
 
   const handleRun = (file: File, w1: number, w2: number, w3: number, topN: number, semantic: boolean) => {
     setUploadState({ file, w1, w2, w3, topN, semantic });
@@ -748,33 +507,22 @@ export default function Home() {
   return (
     <AnimatePresence mode="wait">
       <motion.div key={screen} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.35 }} className="min-h-screen">
-        {screen === "boot"          && <BootScreen onDone={() => setScreen("home")} />}
-        {screen === "home"          && <HomeScreen onStart={() => setScreen("mode-select")} onAbout={goAbout} />}
-        {screen === "mode-select"   && <ModeSelectScreen onSelect={handleModeSelect} onBack={() => setScreen("home")} />}
-        {screen === "single-upload" && (
-          <SinglePDFScreen
-            onBack={() => setScreen("mode-select")}
-            onResult={(data) => { setSingleResult(data); setScreen("single-result"); }}
-            onError={(msg) => { setErrorMsg(msg); setScreen("error"); }}
-          />
-        )}
-        {screen === "single-result" && singleResult && (
-          <SingleResultScreen result={singleResult} onBack={() => setScreen("single-upload")} />
-        )}
-        {screen === "select"  && <SelectScreen mode={mode} onRun={handleRun} onBack={() => setScreen("mode-select")} />}
+        {screen === "boot" && <BootScreen onDone={() => setScreen("home")} />}
+        {screen === "home" && <HomeScreen onStart={() => setScreen("select")} onAbout={goAbout} />}
+        {screen === "select" && <SelectScreen onRun={handleRun} />}
         {screen === "loading" && uploadState && (
           <RealLoadingScreen
             {...uploadState}
-            mode={mode}
             onDone={(jid, res) => { setJobId(jid); setResults(res); setScreen("results"); }}
             onError={(msg) => { setErrorMsg(msg); setScreen("error"); }}
           />
         )}
         {screen === "results" && (
-          <ResultsScreen results={results} jobId={jobId} onBack={() => setScreen("mode-select")} onAbout={goAbout} />
+          <ResultsScreen results={results} jobId={jobId} onBack={() => setScreen("select")} onAbout={goAbout} />
         )}
         {screen === "about" && <AboutScreen onBack={goBack} />}
-        {screen === "error"  && <ErrorScreen message={errorMsg} onHome={() => { setErrorMsg(""); setScreen("home"); }} />}
+        {screen === "error" && <ErrorScreen message={errorMsg} onHome={() => { setErrorMsg(""); setScreen("home"); }} />}
+        
       </motion.div>
     </AnimatePresence>
   );
