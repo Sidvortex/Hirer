@@ -53,6 +53,12 @@ JOBS: dict[str, dict] = {}
 TEMP_DIR = Path(tempfile.gettempdir()) / "hirer"
 TEMP_DIR.mkdir(exist_ok=True)
 
+# Live-server limits. 0 means "no limit", which is the default for local runs.
+# Set these as environment variables on the hosted backend (the Dockerfile does).
+JSONL_ENTRY_LIMIT = int(os.environ.get("JSONL_ENTRY_LIMIT", "0"))
+PDF_COUNT_LIMIT   = int(os.environ.get("PDF_COUNT_LIMIT", "0"))
+PDF_SIZE_LIMIT_MB = float(os.environ.get("PDF_SIZE_LIMIT_MB", "0"))
+
 
 @app.get("/health")
 def health():
@@ -92,6 +98,17 @@ async def rank_candidates(
 
     with open(input_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
+
+    if JSONL_ENTRY_LIMIT:
+        with open(input_path, "rb") as f:
+            n_entries = sum(1 for line in f if line.strip())
+        if n_entries > JSONL_ENTRY_LIMIT:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            raise HTTPException(
+                status_code=400,
+                detail=f"This server accepts up to {JSONL_ENTRY_LIMIT:,} entries per file; yours has "
+                       f"{n_entries:,}. Run Hirer locally for larger files.",
+            )
 
     JOBS[job_id] = {
         "status": "running",
@@ -319,10 +336,6 @@ if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
 
 
-# ── Limits ─────────────────────────────────────────────────────────────────────
-JSONL_ENTRY_LIMIT = 1000
-PDF_COUNT_LIMIT   = 50
-PDF_SIZE_LIMIT_MB = 50
 
 
 # ── Single PDF / Image resume screening ────────────────────────────────────────
@@ -355,7 +368,15 @@ async def screen_single_resume(file: UploadFile = File(...)):
         text = extract_text_from_image(str(file_path))
 
     if not text.strip():
-        raise HTTPException(status_code=400, detail="Could not extract text. If this is a scanned PDF, make sure Tesseract is installed on the server.")
+        if is_image:
+            raise HTTPException(
+                status_code=422,
+                detail="Image/scanned resume OCR is not available on the live server. Please convert your resume to a text-based PDF and upload that instead."
+            )
+        raise HTTPException(
+            status_code=422,
+            detail="Could not extract text from this PDF. It may be a scanned image. Please use a text-based PDF (one where you can select/copy text)."
+        )
 
     candidate = extract_from_text(text, file.filename or "resume")
 
@@ -454,7 +475,7 @@ async def screen_bulk_resumes(
 
     contents = await file.read()
     size_mb  = len(contents) / (1024 * 1024)
-    if size_mb > PDF_SIZE_LIMIT_MB:
+    if PDF_SIZE_LIMIT_MB and size_mb > PDF_SIZE_LIMIT_MB:
         raise HTTPException(status_code=400, detail=f"ZIP too large ({size_mb:.1f} MB). Live limit is {PDF_SIZE_LIMIT_MB} MB.")
 
     job_id      = str(uuid.uuid4())
@@ -466,7 +487,8 @@ async def screen_bulk_resumes(
     with open(zip_path, "wb") as f:
         f.write(contents)
 
-    JOBS[job_id] = {"status":"running","step":"Queued...","pct":0,"output":str(output_path),"total_candidates":0,"error":None}
+    JOBS[job_id] = {"status": "running", "step": "Queued...", "pct": 0, "steps": [],
+                    "output": str(output_path), "total_candidates": 0, "error": None, "result": None}
 
     background_tasks.add_task(
         _run_bulk_pdf,
@@ -479,6 +501,7 @@ async def screen_bulk_resumes(
 def _upd(job_id, step, pct, status="running"):
     if job_id in JOBS:
         JOBS[job_id].update({"step": step, "pct": pct, "status": status})
+        JOBS[job_id]["steps"].append(step)
 
 
 def _run_bulk_pdf(job_id, zip_path, output_path, w1, w2, w3, top_n):
@@ -498,7 +521,7 @@ def _run_bulk_pdf(job_id, zip_path, output_path, w1, w2, w3, top_n):
                      if any(f.lower().endswith(ext) for ext in SUPPORTED)
                      and not f.startswith("__")]
 
-            if len(files) > PDF_COUNT_LIMIT:
+            if PDF_COUNT_LIMIT and len(files) > PDF_COUNT_LIMIT:
                 files = files[:PDF_COUNT_LIMIT]
                 _upd(job_id, f"Capped to {PDF_COUNT_LIMIT} files (live server limit)", 6)
 
@@ -552,6 +575,7 @@ def _run_bulk_pdf(job_id, zip_path, output_path, w1, w2, w3, top_n):
             })
 
         pd.DataFrame(rows).to_csv(output_path, index=False)
+        JOBS[job_id]["result"] = {"job_id": job_id, "total_candidates": len(candidates), "ranked": len(rows)}
         _upd(job_id, "Done!", 100, "done")
 
     except Exception as e:

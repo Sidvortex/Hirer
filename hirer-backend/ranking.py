@@ -142,7 +142,11 @@ def rank_candidates(candidates_path, output_path, top_n=100, use_semantic=True):
     )
     
     # sort and take top N
-    sorted_idx = np.argsort(-final_scores)
+    # round first so the order matches the scores written to the CSV, then break
+    # exact ties by candidate_id ascending (required by validate_submission.py)
+    rounded = np.round(final_scores, 4)
+    ids = np.array([c['candidate_id'] for c in candidates])
+    sorted_idx = np.lexsort((ids, -rounded))
     top_idx = sorted_idx[:top_n]
     
     # build output
@@ -158,7 +162,7 @@ def rank_candidates(candidates_path, output_path, top_n=100, use_semantic=True):
         rows.append({
             'candidate_id': c['candidate_id'],
             'rank': rank,
-            'score': round(score, 4),
+            'score': float(rounded[idx]),
             'reasoning': reasoning
         })
     

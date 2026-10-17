@@ -48,6 +48,11 @@ TIER_3 = ["muit", "galgotias", "gl bajaj", "hbtu", "aktu", "mtu", "sharda", "ben
            "lovely professional", "lpu", "maharishi"]
 
 
+def _contains_term(text: str, term: str) -> bool:
+    """Whole-word match, so 'mit' doesn't hit 'submit', 'rag' doesn't hit 'average', 'excel' doesn't hit 'excellent'."""
+    return re.search(r'(?<![a-z0-9])' + re.escape(term) + r'(?![a-z0-9])', text) is not None
+
+
 def extract_text_from_pdf(pdf_path: str) -> str:
     """Try pdfplumber first, fall back to OCR if empty."""
     text = ""
@@ -78,25 +83,29 @@ def extract_text_from_pdf(pdf_path: str) -> str:
 
 
 def extract_text_from_image(image_path: str) -> str:
-    """OCR on a direct image upload (JPG/PNG)."""
+    """OCR on a direct image upload (JPG/PNG). Returns empty string if tesseract not installed."""
     try:
         import pytesseract
         from PIL import Image
         img = Image.open(image_path)
         return pytesseract.image_to_string(img)
-    except Exception as e:
-        raise ValueError(f"Could not read image: {e}")
+    except ImportError:
+        # tesseract not installed on this server — return empty so caller shows friendly error
+        return ""
+    except Exception:
+        return ""
 
 
 def extract_from_text(text: str, filename: str = "resume") -> dict:
     text_lower = text.lower()
     lines = [l.strip() for l in text.split("\n") if l.strip()]
     candidate_id = f"CAND_{str(uuid.uuid4())[:8].upper()}"
+    career = _extract_career(text, lines)
     return {
         "candidate_id": candidate_id,
-        "profile": _extract_profile(text, text_lower, lines),
+        "profile": _extract_profile(text, text_lower, lines, career),
         "skills": _extract_skills(text_lower),
-        "career_history": _extract_career(text, lines),
+        "career_history": career,
         "education": _extract_education(text, text_lower, lines),
         "certifications": _extract_certifications(text_lower),
         "redrob_signals": _default_signals(),
@@ -104,7 +113,7 @@ def extract_from_text(text: str, filename: str = "resume") -> dict:
     }
 
 
-def _extract_profile(text, text_lower, lines):
+def _extract_profile(text, text_lower, lines, career):
     return {
         "name": _extract_name(lines),
         "email": _extract_email(text),
@@ -112,7 +121,7 @@ def _extract_profile(text, text_lower, lines):
         "headline": _extract_headline(lines),
         "summary": _extract_summary(text_lower, lines),
         "current_title": _extract_current_title(lines, text_lower),
-        "years_of_experience": _extract_yoe(text_lower),
+        "years_of_experience": _extract_yoe(text_lower, career),
         "location": _extract_location(text_lower),
         "current_industry": _infer_industry(text_lower),
     }
@@ -161,7 +170,7 @@ def _extract_summary(text_lower, lines):
     return ""
 
 
-def _extract_yoe(text_lower):
+def _extract_yoe(text_lower, career):
     patterns = [
         r'(\d+)\+?\s*years?\s+of\s+experience',
         r'(\d+)\+?\s*years?\s+experience',
@@ -172,17 +181,15 @@ def _extract_yoe(text_lower):
         m = re.search(pat, text_lower)
         if m:
             return float(m.group(1))
-    return _calc_yoe_from_dates(text_lower)
+    return _calc_yoe_from_career(career)
 
 
-def _calc_yoe_from_dates(text_lower):
+def _calc_yoe_from_career(career):
+    """Earliest job start year to now. Education years are ignored so they don't inflate experience."""
     current_year = datetime.now().year
-    years_found = [int(y) for y in re.findall(r'(19|20)\d{2}', text_lower)]
-    if len(years_found) >= 2:
-        earliest = min(years_found)
-        if 1990 <= earliest <= current_year:
-            return float(current_year - earliest)
-    return 0.0
+    starts = [j["start_year"] for j in career
+              if j.get("start_year") and 1970 <= j["start_year"] <= current_year]
+    return float(current_year - min(starts)) if starts else 0.0
 
 
 def _extract_current_title(lines, text_lower):
@@ -236,7 +243,7 @@ def _extract_skills(text_lower):
     found = []
     seen = set()
     for skill in KNOWN_SKILLS:
-        if skill in text_lower and skill not in seen:
+        if skill not in seen and _contains_term(text_lower, skill):
             seen.add(skill)
             proficiency = "intermediate"
             if any(w in text_lower for w in [f"expert in {skill}", f"proficient in {skill}", f"strong {skill}"]):
@@ -269,7 +276,7 @@ def _extract_career(text, lines):
             if current_job and desc_lines:
                 current_job["description"] = " ".join(desc_lines[:5])
                 career.append(current_job)
-            years = re.findall(r'(19|20)\d{2}', line)
+            years = re.findall(r'(?:19|20)\d{2}', line)
             current_job = {
                 "title": "", "company": "",
                 "start_year": int(years[0]) if years else None,
@@ -320,15 +327,16 @@ def _extract_education(text, text_lower, lines):
             context = text_lower[start:end]
             institution = _find_institution(context)
             tier = _get_tier(context)
-            years = re.findall(r'(19|20)\d{2}', text[start:end])
+            seg = "\n".join(text[m.start():].split("\n")[:2])
+            years = sorted(int(y) for y in re.findall(r'(?:19|20)\d{2}', seg))
             edu.append({
                 "degree": degree_name,
                 "field_of_study": _extract_field(context),
                 "institution": institution,
                 "tier": tier,
-                "start_year": int(years[0]) if len(years) >= 1 else None,
-                "end_year": int(years[1]) if len(years) >= 2 else None,
-                "grade": _extract_grade(context),
+                "start_year": years[0] if years else None,
+                "end_year": years[-1] if len(years) >= 2 else None,
+                "grade": _extract_grade(seg.lower()),
             })
             if len(edu) >= 3:
                 break
@@ -336,22 +344,27 @@ def _extract_education(text, text_lower, lines):
 
 
 def _find_institution(context):
-    for inst in TIER_1 + TIER_2 + TIER_3:
-        if inst in context:
-            return inst.upper() if len(inst) <= 4 else inst.title()
+    for inst in sorted(TIER_1 + TIER_2 + TIER_3, key=len, reverse=True):
+        if _contains_term(context, inst):
+            return _pretty_institution(inst)
     m = re.search(r'([a-z\s]+(?:university|college|institute|school)[a-z\s]*)', context)
     if m:
         return m.group(0).strip().title()[:50]
     return "Unknown Institution"
 
 
+_ACRONYMS = {"iit", "iim", "iisc", "bits", "nit", "mit", "cmu", "vit", "srm", "pec", "dtu",
+             "nsut", "iiit", "hbtu", "aktu", "mtu", "lpu", "muit", "gl"}
+
+
+def _pretty_institution(inst):
+    return " ".join(w.upper() if w in _ACRONYMS else w.title() for w in inst.split())
+
+
 def _get_tier(context):
-    for inst in TIER_1:
-        if inst in context: return "tier_1"
-    for inst in TIER_2:
-        if inst in context: return "tier_2"
-    for inst in TIER_3:
-        if inst in context: return "tier_3"
+    for inst in sorted(TIER_1 + TIER_2 + TIER_3, key=len, reverse=True):
+        if _contains_term(context, inst):
+            return "tier_1" if inst in TIER_1 else "tier_2" if inst in TIER_2 else "tier_3"
     return "unknown"
 
 
@@ -373,10 +386,11 @@ def _extract_field(context):
     return "Engineering"
 
 
-def _extract_grade(context):
-    m = re.search(r'(\d+\.?\d*)\s*(?:cgpa|gpa|cpi)', context)
+def _extract_grade(segment):
+    m = (re.search(r'(?:cgpa|gpa|cpi)\s*[:\-]?\s*(\d+(?:\.\d+)?)', segment)
+         or re.search(r'(\d+(?:\.\d+)?)\s*(?:cgpa|gpa|cpi)', segment))
     if m: return f"{m.group(1)} CGPA"
-    m = re.search(r'(\d+\.?\d*)\s*%', context)
+    m = re.search(r'(\d+(?:\.\d+)?)\s*%', segment)
     if m: return f"{m.group(1)}%"
     return None
 
