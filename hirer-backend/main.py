@@ -282,7 +282,7 @@ async def screen_single_resume(file: UploadFile = File(...)):
 
     try:
         from extractor import extract_from_text, extract_text_from_pdf, extract_text_from_image
-        from feature_engineering import experience_score
+        from hirer_core.features import experience_score
     except ImportError as e:
         raise HTTPException(status_code=500, detail=f"Missing dependency: {e}")
 
@@ -354,7 +354,7 @@ async def screen_single_resume(file: UploadFile = File(...)):
 
     results = []
     for jd in JD_LIST:
-        kw_hits = sum(1 for kw in jd["keywords"] if kw in candidate_text)
+        kw_hits = sum(1 for kw in jd["keywords"] if contains_term(candidate_text, kw))
         kw_score = kw_hits / len(jd["keywords"])
         exp_s = experience_score(candidate)
         combined = min(kw_score * 0.65 + exp_s * 0.25 + 0.10, 0.99)
@@ -395,6 +395,7 @@ async def screen_bulk_resumes(
     semantic_weight:   float = Form(0.35),
     behavioral_weight: float = Form(0.25),
     top_n:             int   = Form(50),
+    use_semantic:      bool  = Form(False),
 ):
     """Upload a ZIP of PDF/image resumes → extract → rank. Poll /status/{job_id}."""
     if not (file.filename or "").lower().endswith(".zip"):
@@ -424,7 +425,7 @@ async def screen_bulk_resumes(
     background_tasks.add_task(
         _run_bulk_pdf,
         job_id, str(zip_path), str(output_path),
-        skill_weight, semantic_weight, behavioral_weight, top_n
+        skill_weight, semantic_weight, behavioral_weight, top_n, use_semantic
     )
     return {"job_id": job_id, "status": "running"}
 
@@ -435,12 +436,10 @@ def _upd(job_id, step, pct, status="running"):
         JOBS[job_id]["steps"].append(step)
 
 
-def _run_bulk_pdf(job_id, zip_path, output_path, w1, w2, w3, top_n):
+def _run_bulk_pdf(job_id, zip_path, output_path, w1, w2, w3, top_n, use_semantic=False):
     try:
-        import zipfile, pandas as pd, numpy as np
+        import zipfile
         from extractor import extract_from_text, extract_text_from_pdf, extract_text_from_image
-        from utils import normalize_0_1
-        from feature_engineering import get_features, MUST_HAVE_SKILLS, _get_full_text
 
         _upd(job_id, "Opening ZIP...", 5)
 
@@ -449,8 +448,7 @@ def _run_bulk_pdf(job_id, zip_path, output_path, w1, w2, w3, top_n):
 
         with zipfile.ZipFile(zip_path, "r") as z:
             files = [f for f in z.namelist()
-                     if any(f.lower().endswith(ext) for ext in SUPPORTED)
-                     and not f.startswith("__")]
+                     if f.lower().endswith(SUPPORTED) and not f.startswith("__")]
 
             if PDF_COUNT_LIMIT and len(files) > PDF_COUNT_LIMIT:
                 files = files[:PDF_COUNT_LIMIT]
@@ -462,10 +460,9 @@ def _run_bulk_pdf(job_id, zip_path, output_path, w1, w2, w3, top_n):
 
             for i, fname in enumerate(files):
                 try:
-                    data = z.read(fname)
                     fpath = tmp / f"{i}{Path(fname).suffix}"
                     with open(fpath, "wb") as f:
-                        f.write(data)
+                        f.write(z.read(fname))
                     if fname.lower().endswith(".pdf"):
                         text = extract_text_from_pdf(str(fpath))
                     else:
@@ -474,40 +471,23 @@ def _run_bulk_pdf(job_id, zip_path, output_path, w1, w2, w3, top_n):
                         candidates.append(extract_from_text(text, fname))
                 except Exception:
                     pass
-                _upd(job_id, f"Extracted {i+1}/{len(files)} files...", 5 + int((i/len(files))*45))
+                _upd(job_id, f"Extracted {i+1}/{len(files)} files...", 5 + int(((i + 1) / len(files)) * 20))
 
         if not candidates:
             raise ValueError("Could not extract text from any file.")
 
-        _upd(job_id, f"Extracted {len(candidates)} resumes. Scoring...", 55)
-        feat_df = pd.DataFrame([get_features(c) for c in candidates])
-
-        combined_skill = (feat_df["skill_score"]*0.5 + feat_df["experience_score"]*0.25 +
-                          feat_df["title_score"]*0.15 + feat_df["education_score"]*0.10)
-
-        _upd(job_id, "Combining scores...", 80)
-        final_scores = (w1 * normalize_0_1(combined_skill.values) +
-                        w2 * normalize_0_1(np.array([0.5]*len(candidates))) +
-                        w3 * normalize_0_1(feat_df["behavioral_score"].values))
-
-        top_idx = np.argsort(-final_scores)[:top_n]
-        rows = []
-        for rank, idx in enumerate(top_idx, 1):
-            c = candidates[idx]
-            p = c.get("profile", {})
-            skill_hits = sum(1 for kw in MUST_HAVE_SKILLS if kw in _get_full_text(c).lower())
-            rows.append({
-                "candidate_id": c["candidate_id"],
-                "name":         p.get("name", "Unknown"),
-                "rank":         rank,
-                "score":        round(float(final_scores[idx]), 4),
-                "reasoning":    f"{p.get('current_title','?')} with {p.get('years_of_experience',0):.1f} yrs exp; {skill_hits} JD skill matches.",
-                "source_file":  c.get("_source_file", ""),
-            })
-
-        pd.DataFrame(rows).to_csv(output_path, index=False)
-        JOBS[job_id]["result"] = {"job_id": job_id, "total_candidates": len(candidates), "ranked": len(rows)}
-        _upd(job_id, "Done!", 100, "done")
+        _upd(job_id, f"Extracted {len(candidates)} resumes. Scoring...", 28)
+        # Resumes carry no platform activity data, so every candidate gets the
+        # same behavioral score; rank() notices that and moves its weight to
+        # the components that actually differ between candidates.
+        result = rank(
+            candidates,
+            {"skill": w1, "semantic": w2, "behavioral": w3},
+            use_semantic=use_semantic,
+            top_n=top_n,
+            progress=lambda step, pct: _upd(job_id, step, pct),
+        )
+        _finish(job_id, result, output_path, ["candidate_id", "name", "rank", "score", "reasoning", "source_file"])
 
     except Exception as e:
-        JOBS[job_id].update({"status":"error","error":str(e),"step":f"Error: {e}"})
+        JOBS[job_id].update({"status": "error", "error": str(e), "step": f"Error: {e}"})
