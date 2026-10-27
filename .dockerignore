@@ -1,0 +1,9 @@
+.git
+hirer-frontend
+data
+docs
+notebooks
+output
+*.pptx
+**/__pycache__
+**/venv
