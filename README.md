@@ -196,14 +196,20 @@ Hirer/
 ├── 📂 data/                        # Sample data and schema
 ├── 📂 notebooks/
 │   └── exploration.ipynb           # EDA and experiments
-├── 📂 src/                         # Core ranking pipeline
-│   ├── feature_engineering.py      # Skill, experience, behavioral scoring
-│   ├── ranking.py                  # Main pipeline CLI
-│   └── utils.py                    # Data loading helpers
+├── 📂 hirer_core/                  # Scoring code shared by the CLI and the backend
+│   ├── jd.py                       # Job description text and keyword lists
+│   ├── features.py                 # Skill, experience, title, education, behavioral scores
+│   ├── scoring.py                  # Combines scores, ranks, writes reasoning
+│   └── utils.py                    # Loading, whole-word matching, normalization
+├── 📂 src/
+│   └── ranking.py                  # Command-line ranker
 ├── 📂 hirer-backend/               # FastAPI server
-│   ├── main.py                     # API endpoints + SSE streaming
-│   ├── ranking.py                  # Pipeline (backend copy)
+│   ├── main.py                     # API endpoints (polling)
+│   ├── extractor.py                # Resume text extraction (PDF, OCR)
 │   └── requirements.txt
+├── 📂 tests/                       # pytest suite
+├── 🐳 Dockerfile                   # Backend image (build from repo root)
+├── 🚂 railway.json                 # Railway deploy config
 ├── 📂 hirer-frontend/              # Next.js web app
 │   ├── app/page.tsx                # All screens wired together
 │   └── components/ui/             # Individual components
@@ -248,15 +254,19 @@ Open `http://localhost:3000` 🎉
 
 ### Option 2 — CLI Pipeline Only
 
+Run from the repo root:
+
 ```bash
-cd src
-pip install -r ../requirements.txt
+pip install -r requirements.txt
 
 # rank candidates
-python ranking.py --candidates /path/to/candidates.jsonl --out ../output/submission.csv
+python src/ranking.py --candidates /path/to/candidates.jsonl --out output/submission.csv
 
 # fast mode (no semantic scoring)
-python ranking.py --candidates /path/to/candidates.jsonl --out ../output/submission.csv --no-semantic
+python src/ranking.py --candidates /path/to/candidates.jsonl --out output/submission.csv --no-semantic
+
+# tests
+python -m pytest -q
 ```
 
 ---
