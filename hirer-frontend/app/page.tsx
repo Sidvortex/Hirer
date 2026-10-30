@@ -25,6 +25,17 @@ interface Candidate {
   score: number;
   reasoning: string;
   name?: string;
+  skill?: number;
+  semantic?: number;
+  behavioral?: number;
+  matched_skills?: string[];
+}
+
+interface RankMeta {
+  total_candidates: number;
+  weights_used: { skill: number; semantic: number; behavioral: number };
+  reference_date: string;
+  job_title: string;
 }
 
 interface JobMatch {
@@ -98,26 +109,9 @@ const TEAM = [
   },
 ];
 
-// ─── Score candidates for a given job ─────────────────────────────────────────
-function reScoreForJob(results: Candidate[], jobId: number): Candidate[] {
-  // adjust scores based on selected job — different jobs weight different signals
-  const multipliers: Record<number, number[]> = {
-    1: [1.0, 0.9, 0.8, 0.7, 0.6],   // AI Engineer — use original scores
-    2: [0.8, 1.0, 0.7, 0.6, 0.9],   // ML Platform — boost infra-oriented
-    3: [0.9, 0.7, 1.0, 0.8, 0.6],   // NLP Researcher
-    4: [0.6, 0.8, 0.7, 1.0, 0.7],   // Data Scientist
-    5: [0.7, 0.9, 0.6, 0.7, 1.0],   // Backend
-  };
-  const mults = multipliers[jobId] || multipliers[1];
-  return results
-    .map((c, i) => ({ ...c, score: Math.min(0.99, c.score * (mults[i % mults.length] ?? 0.8)) }))
-    .sort((a, b) => b.score - a.score)
-    .map((c, i) => ({ ...c, rank: i + 1 }));
-}
-
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 function BootScreen({ onDone }: { onDone: () => void }) {
-  // silently wake up the Render backend while the animation plays
+  // silently wake up the backend while the animation plays (hosted instances may be asleep)
   useEffect(() => {
     fetch(`${API}/health`).catch(() => {});
   }, []);
@@ -471,7 +465,7 @@ function RealLoadingScreen({
   onDone, onError,
 }: {
   file: File; w1: number; w2: number; w3: number; topN: number; semantic: boolean; mode: UploadMode;
-  onDone: (jobId: string, results: Candidate[]) => void;
+  onDone: (jobId: string, results: Candidate[], meta: RankMeta | null) => void;
   onError: (msg: string) => void;
 }) {
   const [steps, setSteps] = useState<string[]>([]);
@@ -520,7 +514,7 @@ function RealLoadingScreen({
             setPct(100);
             const preview = await fetch(`${API}/preview/${jobId}?limit=100`);
             const previewData = await preview.json();
-            onDone(jobId, previewData.results);
+            onDone(jobId, previewData.results, previewData.meta ?? null);
             return;
           }
         }
@@ -538,22 +532,19 @@ function RealLoadingScreen({
 function ResultsScreen({
   results,
   jobId,
+  meta,
   onBack,
   onAbout,
 }: {
   results: Candidate[];
   jobId: string;
+  meta: RankMeta | null;
   onBack: () => void;
   onAbout: () => void;
 }) {
-  const [selectedJob, setSelectedJob] = useState(1);
-  const [displayed, setDisplayed] = useState(results);
-
-  // when user selects a different job on the radial, rescore
-  const handleJobSelect = (id: number) => {
-    setSelectedJob(id);
-    setDisplayed(reScoreForJob(results, id));
-  };
+  const displayed = results;
+  const job = JOB_DATA[0];
+  const pct = (x?: number) => (x === undefined ? "–" : `${Math.round(x * 100)}`);
 
   const top3 = displayed.slice(0, 3);
 
@@ -591,17 +582,34 @@ function ResultsScreen({
       </div>
 
       <div className="flex">
-        {/* Left — radial job selector */}
-        <div className="w-80 flex-shrink-0 border-r border-white/10 relative" style={{ height: "calc(100vh - 57px)" }}>
-          <div className="absolute top-3 left-0 right-0 text-center font-mono text-[10px] text-white/20 tracking-widest z-10">
-            SELECT JOB TO RERANK
-          </div>
-          <div className="w-full h-full">
-            <RadialOrbitalTimeline timelineData={JOB_DATA} onSelect={handleJobSelect} />
-          </div>
-          <div className="absolute bottom-3 left-0 right-0 text-center font-mono text-[9px] text-white/20">
-            viewing: {JOB_DATA.find((j) => j.id === selectedJob)?.title}
-          </div>
+        {/* Left — what this ranking was scored against */}
+        <div className="w-80 flex-shrink-0 border-r border-white/10 px-6 py-8 overflow-y-auto" style={{ height: "calc(100vh - 57px)" }}>
+          <p className="font-mono text-[10px] text-white/25 mb-3 tracking-widest">SCORED AGAINST</p>
+          <h2 className="font-mono text-sm text-white mb-1">{meta?.job_title ?? job.title}</h2>
+          <p className="font-mono text-[10px] text-white/40 leading-relaxed mb-8">{job.content}</p>
+
+          {meta && (
+            <>
+              <p className="font-mono text-[10px] text-white/25 mb-3 tracking-widest">WEIGHTS USED</p>
+              {(["skill", "semantic", "behavioral"] as const).map((k) => (
+                <div key={k} className="mb-3">
+                  <div className="flex justify-between font-mono text-[10px] text-white/50 mb-1">
+                    <span>{k}</span><span>{Math.round(meta.weights_used[k] * 100)}%</span>
+                  </div>
+                  <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+                    <div className="h-full bg-white/60 rounded-full" style={{ width: `${meta.weights_used[k] * 100}%` }} />
+                  </div>
+                </div>
+              ))}
+              <p className="font-mono text-[9px] text-white/25 leading-relaxed mt-4">
+                A score that is the same for every candidate (semantic when it is switched off, activity signals for
+                resumes) can&apos;t separate anyone, so its weight is moved to the others.
+              </p>
+              <p className="font-mono text-[9px] text-white/25 leading-relaxed mt-4">
+                {meta.total_candidates.toLocaleString()} candidates · activity measured from {meta.reference_date}
+              </p>
+            </>
+          )}
         </div>
 
         {/* Right — results */}
@@ -620,14 +628,15 @@ function ResultsScreen({
           <div>
             <p className="font-mono text-[10px] text-white/25 mb-3 tracking-widest">ALL RANKED ({displayed.length})</p>
             <div className="border border-white/10 overflow-hidden">
-              <div className="grid grid-cols-[36px_160px_1fr_70px] gap-3 px-4 py-2 bg-white/5 font-mono text-[10px] text-white/25">
-                <span>#</span><span>ID</span><span>REASONING</span><span>SCORE</span>
+              <div className="grid grid-cols-[36px_160px_1fr_110px_70px] gap-3 px-4 py-2 bg-white/5 font-mono text-[10px] text-white/25">
+                <span>#</span><span>{displayed[0]?.name ? "NAME" : "ID"}</span><span>REASONING</span><span title="skill / semantic / behavioral, 0-100 within this batch">SKL / SEM / BEH</span><span>SCORE</span>
               </div>
               {displayed.map((c) => (
-                <div key={c.candidate_id} className="grid grid-cols-[36px_160px_1fr_70px] gap-3 px-4 py-2.5 border-t border-white/5 hover:bg-white/5 transition-colors font-mono text-[10px]">
+                <div key={c.candidate_id} className="grid grid-cols-[36px_160px_1fr_110px_70px] gap-3 px-4 py-2.5 border-t border-white/5 hover:bg-white/5 transition-colors font-mono text-[10px]">
                   <span className="text-white/25">{c.rank}</span>
-                  <span className="text-white/80">{c.candidate_id}</span>
-                  <span className="text-white/35 truncate">{c.reasoning}</span>
+                  <span className="text-white/80 truncate">{c.name || c.candidate_id}</span>
+                  <span className="text-white/35 truncate" title={c.matched_skills?.length ? `matched: ${c.matched_skills.join(", ")}` : undefined}>{c.reasoning}</span>
+                  <span className="text-white/40">{pct(c.skill)} / {pct(c.semantic)} / {pct(c.behavioral)}</span>
                   <span className="text-white/60">{(c.score * 100).toFixed(1)}%</span>
                 </div>
               ))}
@@ -728,6 +737,7 @@ export default function Home() {
   const [mode, setMode]               = useState<UploadMode>("jsonl");
   const [results, setResults]         = useState<Candidate[]>([]);
   const [jobId, setJobId]             = useState("");
+  const [meta, setMeta]               = useState<RankMeta | null>(null);
   const [errorMsg, setErrorMsg]       = useState("");
   const [prevScreen, setPrevScreen]   = useState<Screen>("home");
   const [singleResult, setSingleResult] = useState<SingleResult | null>(null);
@@ -776,12 +786,12 @@ export default function Home() {
           <RealLoadingScreen
             {...uploadState}
             mode={mode}
-            onDone={(jid, res) => { setJobId(jid); setResults(res); setScreen("results"); }}
+            onDone={(jid, res, m) => { setJobId(jid); setResults(res); setMeta(m); setScreen("results"); }}
             onError={(msg) => { setErrorMsg(msg); setScreen("error"); }}
           />
         )}
         {screen === "results" && (
-          <ResultsScreen results={results} jobId={jobId} onBack={() => setScreen("mode-select")} onAbout={goAbout} />
+          <ResultsScreen results={results} jobId={jobId} meta={meta} onBack={() => setScreen("mode-select")} onAbout={goAbout} />
         )}
         {screen === "about" && <AboutScreen onBack={goBack} />}
         {screen === "error"  && <ErrorScreen message={errorMsg} onHome={() => { setErrorMsg(""); setScreen("home"); }} />}
