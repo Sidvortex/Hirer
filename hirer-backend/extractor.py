@@ -273,12 +273,17 @@ def _extract_career(text, lines):
             break
         year_match = re.search(r'(19|20)\d{2}', line)
         if year_match and len(line) < 100:
-            if current_job and desc_lines:
+            if current_job:
                 current_job["description"] = " ".join(desc_lines[:5])
                 career.append(current_job)
             years = re.findall(r'(?:19|20)\d{2}', line)
+            # "ML Engineer, Acme 2018 - Present": the text before the year is title and company
+            lead = re.split(r'(?i)[\s(|–—-]*(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+)?(?:19|20)\d{2}',
+                            line)[0].strip(" ,|–—-")
+            lead_parts = [x.strip() for x in re.split(r'\s*[,|@]\s*|\s+at\s+', lead) if x.strip()]
             current_job = {
-                "title": "", "company": "",
+                "title": lead_parts[0] if lead_parts else "",
+                "company": lead_parts[1] if len(lead_parts) > 1 else "",
                 "start_year": int(years[0]) if years else None,
                 "end_year": int(years[1]) if len(years) > 1 else datetime.now().year,
                 "description": "",
@@ -292,7 +297,7 @@ def _extract_career(text, lines):
                 current_job["company"] = line.strip()
             else:
                 desc_lines.append(line.strip())
-    if current_job and desc_lines:
+    if current_job:
         current_job["description"] = " ".join(desc_lines[:5])
         career.append(current_job)
     return career[:6]
