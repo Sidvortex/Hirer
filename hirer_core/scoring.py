@@ -48,10 +48,21 @@ def semantic_scores(candidates, batch_size=64, progress=None):
     return np.concatenate(out) if out else np.array([])
 
 
-def effective_weights(weights, components):
-    """drop the weight of any component that doesn't vary, rescale the rest"""
+def effective_weights(weights, components, available=None, require_variation=True):
+    """
+    Drop the weight of any component that is unavailable, or (when scores are
+    compared within the batch) doesn't vary; rescale the rest to sum to 1.
+    """
+    available = available or {k: True for k in weights}
+    weights = dict(weights)
+    # semantic and keyword scores both measure fit to the job, so when semantic
+    # matching is off its weight goes to the skill score, not to activity
+    if not available.get('semantic', True) and available.get('skill', True):
+        weights['skill'] = weights.get('skill', 0) + weights.get('semantic', 0)
+        weights['semantic'] = 0.0
     informative = {k: w for k, w in weights.items()
-                   if w > 0 and np.ptp(components[k]) > 0}
+                   if w > 0 and available.get(k, True)
+                   and (not require_variation or np.ptp(components[k]) > 0)}
     total = sum(informative.values())
     if total == 0:
         return dict(weights)
