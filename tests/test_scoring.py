@@ -86,3 +86,29 @@ def test_resume_reasoning_has_no_placeholder_signals():
     c['_source_file'] = 'a.pdf'
     row = rank([c, cand('B')], use_semantic=False)['rows'][0]
     assert 'open to work' not in row['reasoning']
+
+
+def test_semantic_off_gives_weight_to_skill():
+    comps = {'skill': np.array([0.1, 0.9]), 'semantic': np.zeros(2),
+             'behavioral': np.array([0.2, 0.5])}
+    w = effective_weights({'skill': 0.4, 'semantic': 0.35, 'behavioral': 0.25}, comps,
+                          {'skill': True, 'semantic': False, 'behavioral': True})
+    assert w == {'skill': 0.75, 'semantic': 0.0, 'behavioral': 0.25}
+
+
+def test_single_resume_is_not_zero():
+    c = cand('A', 'python nlp embeddings faiss')
+    c['_source_file'] = 'a.pdf'
+    res = rank([c], use_semantic=False)
+    assert res['rows'][0]['score'] > 0 and res['relative'] is False
+
+
+def test_resume_details_drive_availability():
+    a, b = cand('A', 'python'), cand('B', 'python')
+    for x in (a, b):
+        x['_source_file'] = x['candidate_id'] + '.pdf'
+    a['_details'] = {'notice_period_days': 15, 'open_to_work': True, 'location': 'Noida'}
+    b['_details'] = {'notice_period_days': 120, 'open_to_work': False}
+    res = rank([b, a], use_semantic=False)
+    assert res['rows'][0]['candidate_id'] == 'A'
+    assert res['weights_used']['behavioral'] > 0
