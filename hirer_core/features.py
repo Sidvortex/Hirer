@@ -104,6 +104,54 @@ def behavioral_score(candidate, ref_date=None):
     return sum(s * w for s, w in parts) / sum(w for _, w in parts)
 
 
+# ── resume candidates ────────────────────────────────────────────────────────
+# A resume has no platform activity data. The recruiter (or a detail file in
+# the ZIP) can supply a few availability facts instead; those go in
+# candidate["_details"]. Anything not supplied counts as neutral (0.5), so a
+# candidate isn't punished for a blank field.
+
+TARGET_LOCATIONS = ['pune', 'noida']
+
+DETAIL_FIELDS = ('notice_period_days', 'open_to_work', 'willing_to_relocate', 'location')
+
+
+def is_resume(candidate):
+    return bool(candidate.get('_source_file'))
+
+
+def has_details(candidate):
+    d = candidate.get('_details') or {}
+    return any(d.get(k) not in (None, '') for k in DETAIL_FIELDS)
+
+
+def availability_score(candidate):
+    d = candidate.get('_details') or {}
+    parts = []
+
+    notice = d.get('notice_period_days')
+    if notice is None:
+        parts.append((0.5, 0.4))
+    else:
+        parts.append((1.0 if notice <= 30 else 0.7 if notice <= 60 else 0.4 if notice <= 90 else 0.2, 0.4))
+
+    otw = d.get('open_to_work')
+    parts.append((0.5 if otw is None else 1.0 if otw else 0.3, 0.3))
+
+    loc = (d.get('location') or '').lower()
+    relocate = d.get('willing_to_relocate')
+    if any(contains_term(loc, t) for t in TARGET_LOCATIONS):
+        loc_score = 1.0
+    elif relocate is True:
+        loc_score = 0.8
+    elif relocate is False and loc:
+        loc_score = 0.2
+    else:
+        loc_score = 0.5
+    parts.append((loc_score, 0.3))
+
+    return sum(s * w for s, w in parts) / sum(w for _, w in parts)
+
+
 def get_features(candidate, ref_date=None):
     text = full_text(candidate)
     matches = skill_matches(candidate, text)
@@ -113,7 +161,8 @@ def get_features(candidate, ref_date=None):
         'experience_score': experience_score(candidate),
         'title_score': title_score(candidate),
         'education_score': education_score(candidate),
-        'behavioral_score': behavioral_score(candidate, ref_date),
+        'behavioral_score': availability_score(candidate) if is_resume(candidate)
+                            else behavioral_score(candidate, ref_date),
         'must_matches': matches['must'],
         'negative_matches': matches['negative'],
     }
