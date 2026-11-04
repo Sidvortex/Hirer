@@ -177,6 +177,7 @@ def _finish(job_id: str, result: dict, output_path: str, csv_columns: list[str])
         "top_score": rows[0]["score"] if rows else None,
         "weights_used": result["weights_used"],
         "reference_date": result["reference_date"],
+        "relative": result["relative"],
         "job_title": JD_TITLE,
     }
 
