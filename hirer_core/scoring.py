@@ -12,7 +12,7 @@ components instead of being silently wasted.
 
 import numpy as np
 
-from .features import get_features
+from .features import get_features, is_resume, has_details
 from .jd import JD_TEXT
 from .utils import normalize_0_1, build_candidate_text, reference_date
 
@@ -75,8 +75,17 @@ def build_reasoning(candidate, feats):
     parts = [f"{p.get('current_title') or 'Unknown'} with "
              f"{(p.get('years_of_experience') or 0):.1f} yrs exp",
              f"{len(feats['must_matches'])} JD skill matches"]
-    if candidate.get('_source_file'):
-        # parsed from a resume: the activity signals are placeholders, not facts
+    if is_resume(candidate):
+        # parsed from a resume: only mention availability facts someone supplied
+        d = candidate.get('_details') or {}
+        if d.get('notice_period_days') is not None:
+            parts.append(f"{d['notice_period_days']}-day notice")
+        if d.get('open_to_work'):
+            parts.append('open to work')
+        if d.get('location'):
+            parts.append(f"based in {d['location']}")
+        if d.get('willing_to_relocate'):
+            parts.append('willing to relocate')
         return '; '.join(parts) + '.'
     if sig.get('open_to_work_flag'):
         parts.append('open to work')
@@ -92,8 +101,14 @@ def rank(candidates, weights=None, use_semantic=True, top_n=100, progress=None):
     Score and rank candidates.
 
     progress(step: str, pct: int) is called along the way if given.
-    Returns a dict with 'rows' (top_n, in rank order), 'weights_used' and
-    'reference_date'.
+    Returns a dict with 'rows' (top_n, in rank order), 'weights_used',
+    'reference_date' and 'relative'.
+
+    Large candidate files are scored relative to each other (min-max), which
+    is what ranking a pool needs. Resume uploads are small, often a handful of
+    files, where min-max would always give someone 0% and someone 100% (and a
+    single resume 0%). So resumes keep their raw 0-1 scores, which mean the
+    same thing however many files were uploaded.
     """
     weights = dict(weights or DEFAULT_WEIGHTS)
     say = progress or (lambda step, pct: None)
@@ -117,8 +132,19 @@ def rank(candidates, weights=None, use_semantic=True, top_n=100, progress=None):
         semantic = np.zeros(len(candidates))  # constant, so its weight is reassigned
 
     components = {'skill': skill, 'semantic': semantic, 'behavioral': behavioral}
-    used = effective_weights(weights, components)
-    normed = {k: normalize_0_1(v) for k, v in components.items()}
+    resumes = all(is_resume(c) for c in candidates)
+    relative = not resumes
+    available = {
+        'skill': True,
+        'semantic': bool(use_semantic and weights.get('semantic', 0) > 0),
+        # resumes have availability data only where someone filled it in
+        'behavioral': (not resumes) or any(has_details(c) for c in candidates),
+    }
+    used = effective_weights(weights, components, available, require_variation=relative)
+    if relative:
+        normed = {k: normalize_0_1(v) for k, v in components.items()}
+    else:
+        normed = {k: np.clip(v, 0, 1) for k, v in components.items()}
 
     say('Combining weighted scores...', 85)
     final = sum(used[k] * normed[k] for k in used)
@@ -148,4 +174,5 @@ def rank(candidates, weights=None, use_semantic=True, top_n=100, progress=None):
     return {'rows': rows,
             'weights_used': {k: round(v, 4) for k, v in used.items()},
             'reference_date': ref.isoformat(),
+            'relative': relative,
             'total_candidates': len(candidates)}
