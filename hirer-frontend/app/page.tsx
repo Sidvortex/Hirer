@@ -16,7 +16,7 @@ const API = process.env.NEXT_PUBLIC_API_URL!;
 const JSONL_LIMIT = 1000;
 const PDF_LIMIT   = 50;
 
-type Screen = "boot" | "home" | "mode-select" | "select" | "loading" | "results" | "single-upload" | "single-result" | "about" | "error";
+type Screen = "boot" | "home" | "mode-select" | "select" | "loading" | "results" | "single-upload" | "single-form" | "single-result" | "bulk-extract" | "bulk-review" | "bulk-rank" | "about" | "error";
 type UploadMode = "jsonl" | "single-pdf" | "bulk-pdf";
 
 interface Candidate {
@@ -36,6 +36,7 @@ interface RankMeta {
   weights_used: { skill: number; semantic: number; behavioral: number };
   reference_date: string;
   job_title: string;
+  relative?: boolean;
 }
 
 interface JobMatch {
@@ -46,11 +47,49 @@ interface JobMatch {
   match_score: number;
   keyword_hits: number;
   total_keywords: number;
+  matched_keywords?: string[];
+  wanted_role?: boolean;
   recommendation: string;
 }
 
+interface ExtractedResume {
+  candidate_id: string;
+  file: string;
+  name: string;
+  current_title: string;
+  years_of_experience: number;
+  skills: string[];
+  location: string;
+  notice_period_days: number | null;
+  open_to_work: boolean | null;
+  willing_to_relocate: boolean | null;
+  has_details: boolean;
+  details_source: string | null;
+}
+
+interface SingleExtract {
+  candidate: Record<string, unknown>;
+  fields: ExtractedResume;
+}
+
+// what the form sends back; empty strings mean "leave as extracted / unknown"
+interface ResumeEdits {
+  name: string;
+  current_title: string;
+  years_of_experience: string;
+  skills: string[];
+  location: string;
+  notice_period_days: string;
+  open_to_work: string;
+  willing_to_relocate: string;
+  expected_role?: string;
+}
+
 interface SingleResult {
-  candidate: { name: string; current_title: string; years_of_experience: number; skills_found: string[]; location: string; industry: string; };
+  candidate: {
+    name: string; current_title: string; years_of_experience: number; skills_found: string[]; location: string; industry: string;
+    notice_period_days?: number | null; willing_to_relocate?: boolean | null; expected_role?: string;
+  };
   job_matches: JobMatch[];
   best_match: string;
   top_domain: string;
@@ -379,6 +418,297 @@ function SinglePDFScreen({ onResult, onBack, onError }: {
       </div>
     </div>
   );
+}
+
+// ─── Shared form bits ─────────────────────────────────────────────────────────
+const inputCls = "w-full bg-transparent border border-white/15 focus:border-white/50 outline-none px-2 py-1.5 font-mono text-xs text-white placeholder:text-white/20";
+
+function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
+  return (
+    <label className="block">
+      <span className="block font-mono text-[10px] text-white/35 mb-1 tracking-widest">{label}</span>
+      {children}
+      {hint && <span className="block font-mono text-[9px] text-white/20 mt-1">{hint}</span>}
+    </label>
+  );
+}
+
+const boolStr = (b: boolean | null | undefined) => (b === true ? "yes" : b === false ? "no" : "");
+
+function editsFrom(r: ExtractedResume): ResumeEdits {
+  return {
+    name: r.name,
+    current_title: r.current_title,
+    years_of_experience: r.years_of_experience ? String(r.years_of_experience) : "",
+    skills: r.skills,
+    location: r.location,
+    notice_period_days: r.notice_period_days === null ? "" : String(r.notice_period_days),
+    open_to_work: boolStr(r.open_to_work),
+    willing_to_relocate: boolStr(r.willing_to_relocate),
+  };
+}
+
+function NoticeSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} className={`${inputCls} bg-neutral-950`}>
+      <option value="">not given</option>
+      <option value="0">immediate</option>
+      <option value="15">15 days</option>
+      <option value="30">30 days</option>
+      <option value="60">60 days</option>
+      <option value="90">90 days</option>
+      <option value="120">more than 90 days</option>
+    </select>
+  );
+}
+
+function YesNo({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex gap-1">
+      {[["yes", "yes"], ["no", "no"], ["", "—"]].map(([v, label]) => (
+        <button key={label} type="button" onClick={() => onChange(v)}
+          className={`flex-1 font-mono text-[10px] py-1.5 border transition-colors ${value === v ? "border-white text-white" : "border-white/15 text-white/30 hover:border-white/40"}`}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SkillChips({ skills, onChange }: { skills: string[]; onChange: (s: string[]) => void }) {
+  const [draft, setDraft] = useState("");
+  const add = () => {
+    const parts = draft.split(",").map((x) => x.trim()).filter(Boolean)
+      .filter((x) => !skills.some((s) => s.toLowerCase() === x.toLowerCase()));
+    if (parts.length) onChange([...skills, ...parts]);
+    setDraft("");
+  };
+  return (
+    <div className="border border-white/15 p-2">
+      <div className="flex flex-wrap gap-1.5 mb-2">
+        {skills.map((s) => (
+          <span key={s} className="font-mono text-[10px] border border-white/20 text-white/60 pl-2 pr-1 py-0.5 flex items-center gap-1">
+            {s}
+            <button type="button" onClick={() => onChange(skills.filter((x) => x !== s))} className="text-white/30 hover:text-red-400 px-1">×</button>
+          </span>
+        ))}
+        {!skills.length && <span className="font-mono text-[10px] text-white/20">no skills found, add some below</span>}
+      </div>
+      <input value={draft} onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+        onBlur={add} placeholder="add a skill and press Enter" className={inputCls} />
+    </div>
+  );
+}
+
+// ─── Single: check your details (before matching) ─────────────────────────────
+const ROLE_OPTIONS = [
+  "Senior AI Engineer", "ML Platform Engineer", "NLP Researcher", "Data Scientist", "Backend Engineer",
+  "Frontend Developer", "Android Developer", "iOS Developer", "Flutter Developer", "DevOps Engineer",
+  "Cloud Architect", "Site Reliability Engineer", "Full Stack Developer", "Data Engineer", "Business Analyst",
+  "Cybersecurity Analyst", "Product Manager", "UI/UX Designer", "Financial Analyst", "Digital Marketing Manager",
+];
+
+function SingleFormScreen({ extracted, onBack, onResult, onError }: {
+  extracted: SingleExtract;
+  onBack: () => void;
+  onResult: (r: SingleResult) => void;
+  onError: (msg: string) => void;
+}) {
+  const [f, setF] = useState<ResumeEdits>({ ...editsFrom(extracted.fields), expected_role: "" });
+  const [loading, setLoading] = useState(false);
+  const set = (k: keyof ResumeEdits) => (v: string) => setF((x) => ({ ...x, [k]: v }));
+
+  const submit = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/match-single`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidate: extracted.candidate, edits: f }),
+      });
+      if (!res.ok) { const err = await res.json(); onError(err.detail || "Failed"); return; }
+      onResult(await res.json());
+    } catch (e: unknown) {
+      onError(e instanceof Error ? e.message : "Cannot connect to backend");
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="min-h-screen bg-neutral-950 text-white px-6 py-10">
+      <div className="max-w-xl mx-auto">
+        <button onClick={onBack} className="font-mono text-xs text-white/30 hover:text-white transition-colors mb-8 block">← back</button>
+        <h2 className="font-handwritten text-5xl text-white mb-2">Check your details</h2>
+        <p className="font-mono text-[10px] text-white/30 mb-8 leading-relaxed">
+          We filled this in from {extracted.fields.file || "your resume"}. Fix anything we got wrong and add what a resume
+          doesn&apos;t say. Only the fields you can see are used.
+        </p>
+
+        <p className="font-mono text-[10px] text-white/25 mb-3 tracking-widest">FROM YOUR RESUME</p>
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <Field label="NAME"><input className={inputCls} value={f.name} onChange={(e) => set("name")(e.target.value)} /></Field>
+          <Field label="CURRENT TITLE"><input className={inputCls} value={f.current_title} onChange={(e) => set("current_title")(e.target.value)} /></Field>
+          <Field label="YEARS OF EXPERIENCE"><input className={inputCls} type="number" min={0} step={0.5} value={f.years_of_experience} onChange={(e) => set("years_of_experience")(e.target.value)} /></Field>
+          <Field label="CURRENT LOCATION"><input className={inputCls} value={f.location} placeholder="e.g. Noida" onChange={(e) => set("location")(e.target.value)} /></Field>
+        </div>
+        <div className="mb-8">
+          <Field label="SKILLS"><SkillChips skills={f.skills} onChange={(s) => setF((x) => ({ ...x, skills: s }))} /></Field>
+        </div>
+
+        <p className="font-mono text-[10px] text-white/25 mb-3 tracking-widest">NOT ON YOUR RESUME</p>
+        <div className="grid grid-cols-2 gap-4 mb-10">
+          <Field label="ROLE YOU WANT" hint="matching roles get a small boost">
+            <input className={inputCls} list="hirer-roles" value={f.expected_role} placeholder="e.g. Data Scientist" onChange={(e) => set("expected_role")(e.target.value)} />
+            <datalist id="hirer-roles">{ROLE_OPTIONS.map((r) => <option key={r} value={r} />)}</datalist>
+          </Field>
+          <Field label="NOTICE PERIOD"><NoticeSelect value={f.notice_period_days} onChange={set("notice_period_days")} /></Field>
+          <Field label="OPEN TO RELOCATE"><YesNo value={f.willing_to_relocate} onChange={set("willing_to_relocate")} /></Field>
+        </div>
+
+        <button onClick={submit} disabled={loading}
+          className="w-full bg-white text-black font-mono text-sm py-3 hover:bg-white/90 disabled:opacity-25 transition-colors flex items-center justify-center gap-2">
+          {loading ? <><Loader2 size={14} className="animate-spin" /> Matching...</> : "FIND MY BEST JOB MATCH →"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Bulk: review the resumes that still need details ─────────────────────────
+function BulkReviewScreen({ resumes, skipped, onBack, onRank }: {
+  resumes: ExtractedResume[];
+  skipped: string[];
+  onBack: () => void;
+  onRank: (edits: Record<string, ResumeEdits>) => void;
+}) {
+  const [edits, setEdits] = useState<Record<string, ResumeEdits>>(
+    () => Object.fromEntries(resumes.map((r) => [r.candidate_id, editsFrom(r)])));
+  const [showDone, setShowDone] = useState(false);
+  const needs = resumes.filter((r) => !r.has_details);
+  const done = resumes.filter((r) => r.has_details);
+  const set = (id: string, k: keyof ResumeEdits, v: string) =>
+    setEdits((e) => ({ ...e, [id]: { ...e[id], [k]: v } }));
+  const filled = needs.filter((r) => {
+    const e = edits[r.candidate_id];
+    return e.notice_period_days || e.open_to_work || e.location || e.willing_to_relocate;
+  }).length;
+
+  const row = (r: ExtractedResume) => {
+    const e = edits[r.candidate_id];
+    return (
+      <div key={r.candidate_id} className="border border-white/10 p-4">
+        <div className="flex items-baseline justify-between mb-3 gap-3">
+          <div className="min-w-0">
+            <span className="font-handwritten text-2xl text-white mr-3">{e.name || "Unknown name"}</span>
+            <span className="font-mono text-[10px] text-white/30 truncate">{r.file}</span>
+          </div>
+          {r.has_details
+            ? <span className="font-mono text-[10px] text-green-400/80 flex-shrink-0">✓ details from {r.details_source}</span>
+            : <span className="font-mono text-[10px] text-yellow-500/70 flex-shrink-0">needs details</span>}
+        </div>
+        <div className="grid grid-cols-4 gap-3 mb-3">
+          <Field label="NAME"><input className={inputCls} value={e.name} onChange={(x) => set(r.candidate_id, "name", x.target.value)} /></Field>
+          <Field label="TITLE"><input className={inputCls} value={e.current_title} onChange={(x) => set(r.candidate_id, "current_title", x.target.value)} /></Field>
+          <Field label="YEARS EXP"><input className={inputCls} type="number" min={0} step={0.5} value={e.years_of_experience} onChange={(x) => set(r.candidate_id, "years_of_experience", x.target.value)} /></Field>
+          <Field label="LOCATION"><input className={inputCls} value={e.location} onChange={(x) => set(r.candidate_id, "location", x.target.value)} /></Field>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="NOTICE PERIOD"><NoticeSelect value={e.notice_period_days} onChange={(v) => set(r.candidate_id, "notice_period_days", v)} /></Field>
+          <Field label="OPEN TO WORK"><YesNo value={e.open_to_work} onChange={(v) => set(r.candidate_id, "open_to_work", v)} /></Field>
+          <Field label="WILL RELOCATE"><YesNo value={e.willing_to_relocate} onChange={(v) => set(r.candidate_id, "willing_to_relocate", v)} /></Field>
+        </div>
+        <p className="font-mono text-[9px] text-white/25 mt-3 truncate">
+          skills found: {r.skills.length ? r.skills.join(", ") : "none"}
+        </p>
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-neutral-950 text-white">
+      <div className="border-b border-white/10 px-6 py-4 flex items-center justify-between sticky top-0 bg-neutral-950/90 backdrop-blur z-30">
+        <button onClick={onBack} className="font-mono text-xs text-white/40 hover:text-white transition-colors">← upload again</button>
+        <h1 className="font-mono text-sm text-white/70 tracking-widest">ADD CANDIDATE DETAILS</h1>
+        <div className="w-24" />
+      </div>
+      <div className="max-w-4xl mx-auto px-6 py-8">
+        <p className="font-mono text-xs text-white/50 mb-1">
+          {resumes.length} resumes read · {done.length} already have details · {needs.length} need details
+        </p>
+        <p className="font-mono text-[10px] text-white/25 mb-6 leading-relaxed">
+          Resumes don&apos;t say when someone can join or where they&apos;ll work. Fill in what you know; blanks count as
+          neutral, not as a minus. Check the name, title and years too: those come from automatic extraction.
+        </p>
+
+        {skipped.length > 0 && (
+          <div className="flex items-start gap-2 border border-red-500/20 bg-red-500/5 px-3 py-2 mb-6">
+            <AlertTriangle size={11} className="text-red-400/70 flex-shrink-0 mt-0.5" />
+            <span className="font-mono text-[10px] text-red-400/70">Couldn&apos;t read any text from: {skipped.join(", ")}</span>
+          </div>
+        )}
+
+        <div className="space-y-3 mb-6">{needs.map(row)}</div>
+
+        {done.length > 0 && (
+          <div className="mb-8">
+            <button onClick={() => setShowDone((v) => !v)} className="font-mono text-[10px] text-white/30 hover:text-white/60 tracking-widest mb-3">
+              {showDone ? "▾" : "▸"} {done.length} WITH DETAILS FROM FILES
+            </button>
+            {showDone && <div className="space-y-3">{done.map(row)}</div>}
+          </div>
+        )}
+
+        <div className="sticky bottom-0 bg-neutral-950/95 backdrop-blur py-4 border-t border-white/10 flex items-center gap-4">
+          <span className="font-mono text-[10px] text-white/30 flex-1">{filled}/{needs.length} filled in</span>
+          <button onClick={() => onRank(edits)}
+            className="bg-white text-black font-mono text-sm px-6 py-3 hover:bg-white/90 transition-colors">
+            RANK {resumes.length} RESUMES →
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Generic background job: start it, poll /status, hand back the job id ─────
+function JobScreen({ start, onDone, onError }: {
+  start: () => Promise<Response>;
+  onDone: (jobId: string) => Promise<void> | void;
+  onError: (msg: string) => void;
+}) {
+  const [steps, setSteps] = useState<string[]>([]);
+  const [pct, setPct] = useState(0);
+  const started = useRef(false);
+
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    (async () => {
+      try {
+        const res = await start();
+        if (!res.ok) { const err = await res.json(); onError(err.detail || "Server error"); return; }
+        const { job_id: jobId } = await res.json();
+        let seen = 0;
+        while (true) {
+          await new Promise((r) => setTimeout(r, 1000));
+          const sr = await fetch(`${API}/status/${jobId}`);
+          if (!sr.ok) { onError("Lost track of the job. Please try again."); return; }
+          const st = await sr.json();
+          if (st.steps && st.steps.length > seen) {
+            setSteps((s) => [...s, ...st.steps.slice(seen)]);
+            seen = st.steps.length;
+          }
+          setPct(st.pct);
+          if (st.status === "error") { onError(st.error || "Something went wrong"); return; }
+          if (st.status === "done") { setPct(100); await onDone(jobId); return; }
+        }
+      } catch (e: unknown) {
+        onError(e instanceof Error ? e.message : "Cannot connect to backend. Make sure it is running on port 8000.");
+      }
+    })();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return <LoadingPage steps={steps.length ? steps : ["Connecting to backend..."]} pct={pct} />;
 }
 
 // ─── Single Result ─────────────────────────────────────────────────────────────
