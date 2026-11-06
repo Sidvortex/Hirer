@@ -362,7 +362,7 @@ function SelectScreen({
 
 // ─── Single PDF / Image Upload ─────────────────────────────────────────────────
 function SinglePDFScreen({ onResult, onBack, onError }: {
-  onResult: (data: SingleResult) => void;
+  onResult: (data: SingleExtract) => void;
   onBack: () => void;
   onError: (msg: string) => void;
 }) {
@@ -377,7 +377,7 @@ function SinglePDFScreen({ onResult, onBack, onError }: {
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch(`${API}/screen-single`, { method: "POST", body: fd });
+      const res = await fetch(`${API}/extract-single`, { method: "POST", body: fd });
       if (!res.ok) { const err = await res.json(); onError(err.detail || "Failed"); return; }
       onResult(await res.json());
     } catch (e: unknown) {
@@ -391,7 +391,7 @@ function SinglePDFScreen({ onResult, onBack, onError }: {
         <button onClick={onBack} className="font-mono text-xs text-white/30 hover:text-white transition-colors mb-8 block">← back</button>
         <motion.div initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }}>
           <h2 className="font-handwritten text-5xl text-white mb-2">Upload your resume</h2>
-          <p className="font-mono text-xs text-white/30 mb-2 tracking-widest">WE'LL MATCH YOU AGAINST 20 JOB ROLES</p>
+          <p className="font-mono text-xs text-white/30 mb-2 tracking-widest">WE&apos;LL MATCH YOU AGAINST 20 JOB ROLES</p>
           <p className="font-mono text-[10px] text-white/20 mb-8">Supports PDF, JPG, PNG — including scanned resumes</p>
           <div
             className={`border-2 border-dashed ${dragOver ? "border-white/60 bg-white/5" : file ? "border-white/40" : "border-white/15"} transition-colors p-12 text-center cursor-pointer mb-6`}
@@ -412,7 +412,7 @@ function SinglePDFScreen({ onResult, onBack, onError }: {
             disabled={!file || loading}
             className="w-full bg-white text-black font-mono text-sm py-3 hover:bg-white/90 disabled:opacity-25 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
-            {loading ? <><Loader2 size={14} className="animate-spin" /> Analyzing resume...</> : !file ? "↑ UPLOAD YOUR RESUME FIRST" : "FIND MY BEST JOB MATCH →"}
+            {loading ? <><Loader2 size={14} className="animate-spin" /> Reading resume...</> : !file ? "↑ UPLOAD YOUR RESUME FIRST" : "NEXT: CHECK YOUR DETAILS →"}
           </button>
         </motion.div>
       </div>
@@ -730,8 +730,14 @@ function SingleResultScreen({ result, onBack }: { result: SingleResult; onBack: 
         {/* Candidate card */}
         <motion.div initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }} className="border border-white/10 p-6 mb-6">
           <h2 className="font-handwritten text-4xl text-white mb-1">{c.name}</h2>
-          <p className="font-mono text-xs text-white/50 mb-1">{c.current_title} · {c.years_of_experience.toFixed(1)} yrs · {c.industry}</p>
-          {c.location && <p className="font-mono text-[10px] text-white/30 mb-3">{c.location}</p>}
+          <p className="font-mono text-xs text-white/50 mb-1">{[c.current_title, c.years_of_experience ? `${Number(c.years_of_experience).toFixed(1)} yrs` : "experience not given", c.industry].filter(Boolean).join(" · ")}</p>
+          <p className="font-mono text-[10px] text-white/30 mb-3">
+            {[c.location,
+              c.notice_period_days != null && (c.notice_period_days === 0 ? "can join immediately" : `${c.notice_period_days}-day notice`),
+              c.willing_to_relocate === true && "open to relocate",
+              c.willing_to_relocate === false && "not relocating",
+              c.expected_role && `wants: ${c.expected_role}`].filter(Boolean).join(" · ")}
+          </p>
           <div className="flex flex-wrap gap-2">
             {c.skills_found.map(s => (<span key={s} className="font-mono text-[10px] border border-white/15 text-white/50 px-2 py-1">{s}</span>))}
           </div>
@@ -780,7 +786,10 @@ function SingleResultScreen({ result, onBack }: { result: SingleResult; onBack: 
               <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
                 <div className="h-full bg-white/60 rounded-full" style={{ width:`${job.match_score*100}%` }} />
               </div>
-              <p className="font-mono text-[10px] text-white/30 mt-2">{job.keyword_hits}/{job.total_keywords} keywords matched</p>
+              <p className="font-mono text-[10px] text-white/30 mt-2">
+                {job.keyword_hits}/{job.total_keywords} keywords matched{job.matched_keywords?.length ? `: ${job.matched_keywords.join(", ")}` : ""}
+                {job.wanted_role && <span className="text-green-400/70"> · the role you want</span>}
+              </p>
             </motion.div>
           ))}
         </div>
@@ -817,8 +826,7 @@ function RealLoadingScreen({
 
       try {
         // kick off the job — returns job_id immediately
-        const endpoint = mode === "bulk-pdf" ? `${API}/screen-bulk` : `${API}/rank`;
-        const res = await fetch(endpoint, { method: "POST", body: formData });
+        const res = await fetch(`${API}/rank`, { method: "POST", body: formData });
         if (!res.ok) { const err = await res.json(); onError(err.detail || "Server error"); return; }
         const { job_id: jobId } = await res.json();
 
@@ -1071,6 +1079,10 @@ export default function Home() {
   const [errorMsg, setErrorMsg]       = useState("");
   const [prevScreen, setPrevScreen]   = useState<Screen>("home");
   const [singleResult, setSingleResult] = useState<SingleResult | null>(null);
+  const [singleExtract, setSingleExtract] = useState<SingleExtract | null>(null);
+  const [extractId, setExtractId]     = useState("");
+  const [extracted, setExtracted]     = useState<{ resumes: ExtractedResume[]; skipped: string[] } | null>(null);
+  const [bulkEdits, setBulkEdits]     = useState<Record<string, ResumeEdits>>({});
   const [uploadState, setUploadState] = useState<{
     file: File; w1: number; w2: number; w3: number; topN: number; semantic: boolean;
   } | null>(null);
@@ -1092,7 +1104,15 @@ export default function Home() {
 
   const handleRun = (file: File, w1: number, w2: number, w3: number, topN: number, semantic: boolean) => {
     setUploadState({ file, w1, w2, w3, topN, semantic });
-    setScreen("loading");
+    setScreen(mode === "bulk-pdf" ? "bulk-extract" : "loading");
+  };
+
+  const fail = (msg: string) => { setErrorMsg(msg); setScreen("error"); };
+
+  const loadResults = async (jid: string) => {
+    const r = await fetch(`${API}/preview/${jid}?limit=100`);
+    const data = await r.json();
+    setJobId(jid); setResults(data.results); setMeta(data.meta ?? null); setScreen("results");
   };
 
   return (
@@ -1104,8 +1124,51 @@ export default function Home() {
         {screen === "single-upload" && (
           <SinglePDFScreen
             onBack={() => setScreen("mode-select")}
+            onResult={(data) => { setSingleExtract(data); setScreen("single-form"); }}
+            onError={fail}
+          />
+        )}
+        {screen === "single-form" && singleExtract && (
+          <SingleFormScreen
+            extracted={singleExtract}
+            onBack={() => setScreen("single-upload")}
             onResult={(data) => { setSingleResult(data); setScreen("single-result"); }}
-            onError={(msg) => { setErrorMsg(msg); setScreen("error"); }}
+            onError={fail}
+          />
+        )}
+        {screen === "bulk-extract" && uploadState && (
+          <JobScreen
+            start={() => { const fd = new FormData(); fd.append("file", uploadState.file); return fetch(`${API}/extract-bulk`, { method: "POST", body: fd }); }}
+            onDone={async (jid) => {
+              const data = await (await fetch(`${API}/extracted/${jid}`)).json();
+              setExtractId(jid); setExtracted(data); setBulkEdits({});
+              // every resume already has a detail file: nothing to ask, rank straight away
+              setScreen(data.resumes.every((r: ExtractedResume) => r.has_details) ? "bulk-rank" : "bulk-review");
+            }}
+            onError={fail}
+          />
+        )}
+        {screen === "bulk-review" && extracted && (
+          <BulkReviewScreen
+            resumes={extracted.resumes}
+            skipped={extracted.skipped}
+            onBack={() => setScreen("select")}
+            onRank={(edits) => { setBulkEdits(edits); setScreen("bulk-rank"); }}
+          />
+        )}
+        {screen === "bulk-rank" && uploadState && (
+          <JobScreen
+            start={() => fetch(`${API}/rank-bulk`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                extract_job_id: extractId, edits: bulkEdits,
+                skill_weight: uploadState.w1, semantic_weight: uploadState.w2, behavioral_weight: uploadState.w3,
+                top_n: uploadState.topN, use_semantic: uploadState.semantic,
+              }),
+            })}
+            onDone={loadResults}
+            onError={fail}
           />
         )}
         {screen === "single-result" && singleResult && (
