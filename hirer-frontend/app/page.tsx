@@ -237,6 +237,18 @@ function HomeScreen({ onStart, onAbout }: { onStart: () => void; onAbout: () => 
 }
 
 // ─── Select ───────────────────────────────────────────────────────────────────
+function downloadDetailsTemplate() {
+  const csv = [
+    "file,notice_period_days,open_to_work,location,willing_to_relocate",
+    "asha_rao.pdf,30,yes,Pune,no",
+    "ravi_kumar.pdf,90,no,Bangalore,yes",
+  ].join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.download = "details.csv";
+  a.click();
+}
+
 function SelectScreen({
   mode,
   onRun,
@@ -297,6 +309,14 @@ function SelectScreen({
               <span className="font-mono text-[10px] text-yellow-500/70">
                 Live server limit: {PDF_LIMIT} files max per ZIP, 50 MB max size. No limit for local runs.
               </span>
+            </div>
+          )}
+          {mode === "bulk-pdf" && (
+            <div className="font-mono text-[10px] text-white/35 leading-relaxed border border-white/10 px-3 py-2">
+              Optional: add each candidate&apos;s notice period, location and so on, either as a file with the same name
+              (asha.pdf + asha.txt) or one details.csv for everyone.{" "}
+              <button type="button" onClick={downloadDetailsTemplate} className="underline hover:text-white">download template</button>.
+              Resumes without details get a short form after upload.
             </div>
           )}
 
