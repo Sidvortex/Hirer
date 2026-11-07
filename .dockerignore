@@ -2,8 +2,8 @@
 hirer-frontend
 data
 docs
-notebooks
+scripts
+tests
 output
-*.pptx
 **/__pycache__
 **/venv

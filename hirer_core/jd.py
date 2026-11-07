@@ -1,7 +1,7 @@
 """
 The job description Hirer ranks against, kept in one place.
 
-Both the command-line ranker (src/ranking.py) and the web backend
+Both the command-line ranker (scripts/rank.py) and the web backend
 (hirer-backend/main.py) import from here, so they always score against
 the same text and the same keyword lists.
 """

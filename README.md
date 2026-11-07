@@ -55,7 +55,7 @@
 > | **Fullstack Version** *(recommended)* | `V2` | Full pipeline + Next.js frontend + FastAPI backend | [⬇ Download V2](https://github.com/Sidvortex/Hirer/releases/tag/V2) |
 > | **fully processed Backend** | `V1` | Stable CLI pipeline, backend only — no conflicts | [⬇ Download V1](https://github.com/Sidvortex/Hirer/releases/tag/V1) |
 >
-> Run it locally with `./start.sh` — see [Installation](#-installation) below.
+> Run it locally with `scripts/start.sh` — see [Installation](#-installation) below.
 
 ---
 
@@ -193,30 +193,23 @@ All components are min-max normalized before combining. Sort descending, take to
 
 ```
 Hirer/
-├── 📂 data/                        # Sample data and schema
-├── 📂 notebooks/
-│   └── exploration.ipynb           # EDA and experiments
-├── 📂 hirer_core/                  # Scoring code shared by the CLI and the backend
-│   ├── jd.py                       # Job description text and keyword lists
-│   ├── features.py                 # Skill, experience, title, education, behavioral scores
-│   ├── scoring.py                  # Combines scores, ranks, writes reasoning
-│   └── utils.py                    # Loading, whole-word matching, normalization
-├── 📂 src/
-│   └── ranking.py                  # Command-line ranker
-├── 📂 hirer-backend/               # FastAPI server
-│   ├── main.py                     # API endpoints (polling)
-│   ├── extractor.py                # Resume text extraction (PDF, OCR)
-│   └── requirements.txt
-├── 📂 tests/                       # pytest suite
-├── 🐳 Dockerfile                   # Backend image (build from repo root)
-├── 🚂 railway.json                 # Railway deploy config
-├── 📂 hirer-frontend/              # Next.js web app
-│   ├── app/page.tsx                # All screens wired together
-│   └── components/ui/             # Individual components
-├── 📂 output/                      # Ranked output CSVs
-├── 🚀 start.sh                     # Start everything with one command
-├── 📋 submission_metadata.yaml
-└── ✅ validate_submission.py
+├── 📂 hirer_core/           # Scoring code shared by the CLI and the backend
+│   ├── jd.py               # job description and keyword lists
+│   ├── features.py         # skill, experience, title, education, availability scores
+│   ├── scoring.py          # combines scores, ranks, writes reasoning
+│   └── utils.py            # loading, whole-word matching, normalization
+├── 📂 hirer-backend/        # FastAPI server: API, resume extraction, resume forms
+├── 📂 hirer-frontend/       # Next.js web app
+├── 📂 scripts/
+│   ├── rank.py             # command-line ranker
+│   ├── validate_output.py  # checks a ranked CSV's format
+│   └── start.sh            # starts backend + frontend together
+├── 📂 tests/                # pytest suite
+├── 📂 data/                 # 1,000-candidate sample and the candidate schema
+├── 📂 docs/                 # documentation, presentation, exploration notebook
+├── 🐳 Dockerfile            # backend image (build from the repo root)
+├── 🚂 railway.json          # Railway deploy config
+└── requirements.txt        # CLI dependencies
 ```
 
 ---
@@ -238,8 +231,7 @@ cd Hirer
 ### Option 1 — Full Stack App (recommended)
 
 ```bash
-chmod +x start.sh
-./start.sh
+bash scripts/start.sh
 ```
 
 This automatically:
@@ -260,10 +252,13 @@ Run from the repo root:
 pip install -r requirements.txt
 
 # rank candidates
-python src/ranking.py --candidates /path/to/candidates.jsonl --out output/submission.csv
+python scripts/rank.py --candidates /path/to/candidates.jsonl --out output/submission.csv
 
 # fast mode (no semantic scoring)
-python src/ranking.py --candidates /path/to/candidates.jsonl --out output/submission.csv --no-semantic
+python scripts/rank.py --candidates /path/to/candidates.jsonl --out output/submission.csv --no-semantic
+
+# check the output format
+python scripts/validate_output.py output/submission.csv
 
 # tests
 python -m pytest -q
@@ -284,6 +279,7 @@ uvicorn main:app --reload --port 8000
 **Terminal 2:**
 ```bash
 cd hirer-frontend
+cp -n .env.example .env.local   # points the app at http://localhost:8000
 npm install && npm run dev
 ```
 

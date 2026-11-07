@@ -2,8 +2,8 @@
 Command-line ranker.
 
 Usage (from the repo root):
-    python src/ranking.py --candidates data/candidates.jsonl --out output/submission.csv
-    python src/ranking.py --candidates data/candidates.jsonl.gz --no-semantic
+    python scripts/rank.py --candidates data/candidates.jsonl --out output/submission.csv
+    python scripts/rank.py --candidates data/candidates.jsonl.gz --no-semantic
 
 The scoring itself lives in hirer_core/, which the web backend uses too.
 """

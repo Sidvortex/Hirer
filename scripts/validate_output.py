@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Validate submission CSV per challenge rules (sections 2–3).
-Row 1 = header. Rows 2–101 = exactly 100 data rows. CSV only.
+Check a ranked output CSV: header candidate_id,rank,score,reasoning,
+exactly 100 rows, ranks 1-100, scores non-increasing, ties by candidate_id.
 """
 
 import csv
@@ -15,14 +15,14 @@ DATA_ROW_START = 2
 EXPECTED_DATA_ROWS = 100
 
 
-def validate_submission(csv_path):
+def validate_output(csv_path):
     errors = []
     path = Path(csv_path)
 
     if path.suffix.lower() != ".csv":
         errors.append("Filename must use a .csv extension.")
     elif not path.stem:
-        errors.append("Filename must be your registered participant ID (e.g. team_xxx.csv).")
+        errors.append("Filename is empty.")
 
     try:
         with open(path, "r", encoding="utf-8", newline="") as f:
@@ -148,17 +148,17 @@ def validate_submission(csv_path):
 
 def main():
     if len(sys.argv) != 2:
-        print("Usage: python validate_submission.py <participant_id>.csv")
+        print("Usage: python scripts/validate_output.py output/submission.csv")
         sys.exit(1)
 
-    errors = validate_submission(sys.argv[1])
+    errors = validate_output(sys.argv[1])
     if errors:
         print(f"Validation failed ({len(errors)} issue(s)):\n")
         for e in errors:
             print(f"- {e}")
         sys.exit(1)
 
-    print("Submission is valid.")
+    print("Output is valid.")
 
 
 if __name__ == "__main__":

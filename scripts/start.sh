@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# run this from inside the Hirer/ folder
-cd "$(dirname "$0")"
+# works from anywhere: moves to the repo root (one level above scripts/)
+cd "$(dirname "$0")/.."
 
 echo "Starting Hirer..."
 echo ""
@@ -28,6 +28,9 @@ sleep 3
 # ── Frontend ─────────────────────────────────────────────────
 echo "[2/2] Starting Next.js frontend on http://localhost:3000"
 cd hirer-frontend
+
+# point the frontend at the local backend unless you've set your own URL
+[ -f .env.local ] || cp .env.example .env.local
 
 if [ ! -d "node_modules" ]; then
   echo "Installing frontend dependencies..."
