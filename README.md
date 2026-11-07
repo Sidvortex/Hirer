@@ -292,15 +292,47 @@ npm install && npm run dev
 ## 🎮 Using the Web App
 
 ```
-Boot Screen        →  press any key
-Home Screen        →  click "Start Ranking"
-Select Screen      →  upload candidates.jsonl, pick a job, set weights
-Loading Screen     →  watch the pipeline run live with funny messages
-Results Screen     →  top 3 cards + full ranked table
-                       click a job on the left to rerank for that role
-                       download submission.csv when done
-About Page         →  meet the team
+Bulk JSON          →  upload candidates.jsonl, set weights, run
+                       results: top 3 cards, full table with skill / semantic / behavioral
+                       scores, the weights actually used, download submission.csv
+
+Single Resume      →  upload a PDF or image resume
+                       "Check your details" form, pre-filled from the resume:
+                       fix name / title / years / skills / location, add notice period,
+                       relocation and the role you want, then see matches across 20 roles
+
+Bulk Resume ZIP    →  upload a ZIP of resumes, set weights, run
+                       Hirer reads every resume, then lists the ones missing details
+                       (notice period, open to work, location, relocation) with a short
+                       form each. If every resume already has details, ranking starts
+                       straight away.
 ```
+
+### Detail files for bulk resume ZIPs (optional)
+
+Put either of these in the ZIP alongside the resumes; both can be mixed.
+
+**A file with the same name as the resume** (`asha_rao.pdf` + `asha_rao.txt` or `asha_rao.json`):
+
+```
+Notice period: 30 days
+Open to work: yes
+Location: Pune
+Willing to relocate: no
+Experience: 7
+```
+
+**One `details.csv` for everyone** (the web app has a "download template" link):
+
+```
+file,notice_period_days,open_to_work,location,willing_to_relocate
+asha_rao.pdf,30,yes,Pune,no
+ravi_kumar.pdf,90,no,Bangalore,yes
+```
+
+Blank or missing details count as neutral, not as a minus. Resume uploads are scored on an
+absolute 0-100% scale, so a score means the same thing however many resumes you upload;
+candidates.jsonl files are scored relative to each other.
 
 ---
 
