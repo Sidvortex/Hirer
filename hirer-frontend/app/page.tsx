@@ -908,7 +908,7 @@ function ResultsScreen({
 
   const top3Cards = top3.map((c, i) => ({
     icon: <Sparkles className="size-4 text-blue-300" />,
-    title: `#${i + 1} — ${c.candidate_id}`,
+    title: `#${i + 1} — ${c.name || c.candidate_id}`,
     description: c.reasoning.split(";")[0],
     date: `Score: ${(c.score * 100).toFixed(1)}%`,
     titleClassName: i === 0 ? "text-yellow-400" : i === 1 ? "text-slate-300" : "text-amber-600",
@@ -960,11 +960,14 @@ function ResultsScreen({
                 </div>
               ))}
               <p className="font-mono text-[9px] text-white/25 leading-relaxed mt-4">
-                A score that is the same for every candidate (semantic when it is switched off, activity signals for
-                resumes) can&apos;t separate anyone, so its weight is moved to the others.
+                When semantic matching is off its weight goes to skill. Resumes with no availability details
+                can&apos;t be compared on availability, so that weight moves to skill too.
               </p>
               <p className="font-mono text-[9px] text-white/25 leading-relaxed mt-4">
-                {meta.total_candidates.toLocaleString()} candidates · activity measured from {meta.reference_date}
+                {meta.total_candidates.toLocaleString()} candidates ·{" "}
+                {meta.relative === false
+                  ? "scores are absolute: 100% would be a perfect fit, however many resumes you upload"
+                  : `scores are relative to this file · activity measured from ${meta.reference_date}`}
               </p>
             </>
           )}
