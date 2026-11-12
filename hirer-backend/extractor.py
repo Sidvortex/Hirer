@@ -1,44 +1,20 @@
 """
-extractor.py — Extract structured candidate info from raw resume text
-No LLM. Uses regex + keyword matching + heuristics.
-Also handles OCR for scanned/image PDFs via pytesseract.
+extractor.py — turn a resume (PDF or image) into a structured candidate.
+
+No LLM: regular expressions, the shared skill vocabulary in hirer_core, and
+layout heuristics. Scanned PDFs and images go through Tesseract OCR; set
+HIRER_OCR_LANG (for example "eng+hin") to read other languages.
 """
 
+import os
 import re
 import uuid
 from datetime import datetime
-from typing import Optional
 
+from hirer_core.jobs import CITIES
+from hirer_core.skills import VOCAB, term_in, display
 
-KNOWN_SKILLS = [
-    # ML / AI
-    "python", "machine learning", "deep learning", "nlp", "natural language processing",
-    "computer vision", "transformers", "bert", "gpt", "llm", "fine-tuning",
-    "sentence-transformers", "embeddings", "vector database", "faiss", "pinecone",
-    "weaviate", "qdrant", "milvus", "elasticsearch", "opensearch",
-    "semantic search", "hybrid search", "information retrieval", "ranking",
-    "ndcg", "mrr", "map", "learning to rank", "bm25", "tfidf",
-    "pytorch", "tensorflow", "keras", "scikit-learn", "xgboost", "lightgbm",
-    "hugging face", "langchain", "openai", "lora", "qlora", "peft",
-    "rag", "retrieval augmented generation", "recommendation system",
-    # Data
-    "pandas", "numpy", "sql", "postgresql", "mysql", "mongodb", "redis",
-    "spark", "hadoop", "airflow", "dbt", "data pipeline", "etl",
-    "data science", "data analysis", "statistics", "a/b testing",
-    "tableau", "power bi", "excel", "r programming",
-    # Dev / Infra
-    "java", "javascript", "typescript", "react", "next.js", "node.js",
-    "vue", "angular", "fastapi", "flask", "django", "rest api", "graphql",
-    "docker", "kubernetes", "aws", "gcp", "azure", "ci/cd", "terraform",
-    "git", "linux", "bash", "mlops", "devops",
-    # Other domains
-    "android", "ios", "swift", "kotlin", "flutter", "react native",
-    "figma", "ui/ux", "product management", "agile", "scrum",
-    "cybersecurity", "blockchain", "web3", "solidity",
-    "finance", "accounting", "financial modeling",
-    "digital marketing", "seo", "content writing",
-    "research", "publications",
-]
+OCR_LANG = os.environ.get("HIRER_OCR_LANG", "eng")
 
 TIER_1 = ["iit", "iim", "iisc", "bits pilani", "nit", "mit", "stanford", "harvard", "oxford", "cambridge", "cmu",
            "iit bombay", "iit delhi", "iit madras", "iit kanpur", "iit kharagpur", "iit roorkee", "iit guwahati"]
@@ -53,45 +29,95 @@ def _contains_term(text: str, term: str) -> bool:
     return re.search(r'(?<![a-z0-9])' + re.escape(term) + r'(?![a-z0-9])', text) is not None
 
 
-def extract_text_from_pdf(pdf_path: str) -> str:
-    """Try pdfplumber first, fall back to OCR if empty."""
-    text = ""
+def _column_split(page):
+    """
+    If the page has two columns, return (x, header_bottom): the x position of
+    the gap between them, and where a full-width header (name, contact line)
+    ends. Returns None for an ordinary single-column page.
+    """
+    words = page.extract_words()
+    if len(words) < 40:
+        return None
+    x0, top, x1, bottom = page.bbox
+    width, height = x1 - x0, bottom - top
+    gap = 5          # half-width of the empty band a column gap must have
+    valid = {}
+    x = x0 + 0.2 * width
+    while x < x0 + 0.8 * width:
+        crossing = [w for w in words if w["x0"] < x + gap and w["x1"] > x - gap]
+        header = max((w["bottom"] for w in crossing), default=top)
+        if len(crossing) <= 0.15 * len(words) and header <= top + 0.3 * height:
+            body = [w for w in words if w["top"] >= header]
+            left = sum(w["x1"] <= x for w in body)
+            if body and min(left, len(body) - left) >= 0.15 * len(body):
+                valid[round(x, 1)] = header
+        x += 3
+    if not valid:
+        return None
+    # centre of the widest run of valid positions
+    xs = sorted(valid)
+    runs, run = [], [xs[0]]
+    for v in xs[1:]:
+        if v - run[-1] <= 3.5:
+            run.append(v)
+        else:
+            runs.append(run)
+            run = [v]
+    runs.append(run)
+    best = max(runs, key=len)
+    mid = best[len(best) // 2]
+    return mid, valid[mid]
 
+
+def _page_text(page):
+    """text of one page, reading a two-column layout one column at a time"""
+    split = _column_split(page)
+    if split is None:
+        return page.extract_text() or ""
+    x, header_bottom = split
+    x0, top, x1, bottom = page.bbox
+    parts = [page.crop((x0, top, x1, header_bottom)).extract_text() or ""] if header_bottom > top + 1 else []
+    # within_bbox keeps only text fully inside the box, so the header's last line isn't read twice
+    parts += [page.within_bbox(b).extract_text() or ""
+              for b in ((x0, header_bottom, x, bottom), (x, header_bottom, x1, bottom))]
+    return "\n".join(p for p in parts if p.strip())
+
+
+def extract_text_from_pdf(pdf_path: str) -> str:
+    """pdfplumber first (column-aware), OCR if the PDF has no text layer"""
+    text, links = "", []
     try:
         import pdfplumber
         with pdfplumber.open(pdf_path) as pdf:
-            text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+            pages = []
+            for page in pdf.pages:
+                pages.append(_page_text(page))
+                links += [h.get("uri") for h in page.hyperlinks if h.get("uri")]
+            text = "\n".join(pages)
     except Exception:
         pass
 
     if text.strip():
-        return text
+        # links hidden behind words like "GitHub" are part of the resume too
+        hidden = [u for u in dict.fromkeys(links) if u not in text]
+        return text + ("\n" + "\n".join(hidden) if hidden else "")
 
-    # Fallback to OCR for scanned/image PDFs
     try:
         import pytesseract
         from pdf2image import convert_from_path
-        pages = convert_from_path(pdf_path, dpi=200)
-        ocr_parts = []
-        for page in pages:
-            ocr_parts.append(pytesseract.image_to_string(page))
-        text = "\n".join(ocr_parts)
+        text = "\n".join(pytesseract.image_to_string(page, lang=OCR_LANG)
+                         for page in convert_from_path(pdf_path, dpi=200))
     except Exception:
         pass
-
     return text
 
 
 def extract_text_from_image(image_path: str) -> str:
-    """OCR on a direct image upload (JPG/PNG). Returns empty string if tesseract not installed."""
+    """OCR on an image upload. Returns "" if Tesseract isn't installed, so the caller can say so."""
     try:
         import pytesseract
         from PIL import Image
-        img = Image.open(image_path)
-        return pytesseract.image_to_string(img)
-    except ImportError:
-        # tesseract not installed on this server — return empty so caller shows friendly error
-        return ""
+        return pytesseract.image_to_string(Image.open(image_path), lang=OCR_LANG)
     except Exception:
         return ""
 
@@ -124,12 +150,19 @@ def _extract_profile(text, text_lower, lines, career):
         "years_of_experience": _extract_yoe(text_lower, career),
         "location": _extract_location(text_lower),
         "current_industry": _infer_industry(text_lower),
+        "github": _extract_github(text),
     }
+
+
+def _extract_github(text):
+    m = re.search(r'github\.com/([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))', text, re.I)
+    return m.group(1) if m and m.group(1).lower() not in ("orgs", "topics", "features") else None
 
 
 def _extract_name(lines):
     for line in lines[:4]:
-        skip = ["resume", "cv", "curriculum", "profile", "portfolio", "contact", "summary"]
+        skip = ["resume", "cv", "curriculum", "profile", "portfolio", "contact", "summary", "skills",
+                "experience", "education", "projects", "objective", "languages", "certifications"]
         if any(w in line.lower() for w in skip):
             continue
         if re.match(r'^[A-Z][a-zA-Z]+(\s+[A-Z][a-zA-Z]+){1,3}$', line):
@@ -185,11 +218,18 @@ def _extract_yoe(text_lower, career):
 
 
 def _calc_yoe_from_career(career):
-    """Earliest job start year to now. Education years are ignored so they don't inflate experience."""
-    current_year = datetime.now().year
-    starts = [j["start_year"] for j in career
-              if j.get("start_year") and 1970 <= j["start_year"] <= current_year]
-    return float(current_year - min(starts)) if starts else 0.0
+    """Years actually worked: job spans added up, overlaps counted once, gaps not counted."""
+    now = datetime.now().year
+    spans = sorted((j["start_year"], max(j["start_year"], min(j.get("end_year") or now, now)))
+                   for j in career if j.get("start_year") and 1970 <= j["start_year"] <= now)
+    merged = []
+    for start, end in spans:
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    # a job that starts and ends in the same year still counts as half a year
+    return float(sum(max(end - start, 0.5) for start, end in merged))
 
 
 def _extract_current_title(lines, text_lower):
@@ -208,49 +248,42 @@ def _extract_current_title(lines, text_lower):
 
 
 def _extract_location(text_lower):
-    cities = ["bangalore", "bengaluru", "mumbai", "delhi", "hyderabad", "pune",
-              "chennai", "kolkata", "noida", "gurgaon", "gurugram", "ahmedabad",
-              "remote", "new york", "san francisco", "london", "singapore"]
-    for city in cities:
-        if city in text_lower:
+    for city in CITIES:
+        if _contains_term(text_lower, city):
             return city.title()
     return ""
 
 
 def _infer_industry(text_lower):
-    if any(w in text_lower for w in ["machine learning", "nlp", "ai", "deep learning", "llm"]):
-        return "Artificial Intelligence"
-    if any(w in text_lower for w in ["frontend", "react", "vue", "angular", "ui/ux"]):
-        return "Frontend Development"
-    if any(w in text_lower for w in ["backend", "fastapi", "django", "flask", "node"]):
-        return "Backend Development"
-    if any(w in text_lower for w in ["devops", "kubernetes", "docker", "cloud", "aws", "gcp"]):
-        return "DevOps / Cloud"
-    if any(w in text_lower for w in ["data science", "analytics", "tableau", "power bi"]):
-        return "Data Science"
-    if any(w in text_lower for w in ["android", "ios", "flutter", "react native"]):
-        return "Mobile Development"
-    if any(w in text_lower for w in ["finance", "accounting", "financial"]):
-        return "Finance"
-    if any(w in text_lower for w in ["marketing", "seo", "content", "brand"]):
-        return "Marketing"
-    if any(w in text_lower for w in ["software", "developer", "engineer"]):
-        return "Software Engineering"
-    return "Technology"
+    groups = [
+        ("Artificial Intelligence", ["machine learning", "nlp", "ai", "deep learning", "llm"]),
+        ("Data Engineering", ["data engineer", "spark", "airflow", "etl", "kafka"]),
+        ("Frontend Development", ["frontend", "react", "vue", "angular", "ui/ux"]),
+        ("Backend Development", ["backend", "fastapi", "django", "flask", "node.js"]),
+        ("DevOps / Cloud", ["devops", "kubernetes", "docker", "cloud", "aws", "gcp"]),
+        ("Data Science", ["data science", "analytics", "tableau", "power bi"]),
+        ("Mobile Development", ["android", "ios", "flutter", "react native"]),
+        ("Finance", ["finance", "accounting", "financial"]),
+        ("Marketing", ["marketing", "seo", "content", "brand"]),
+        ("Software Engineering", ["software", "developer", "engineer"]),
+    ]
+    # whole words only ("ai" must not match "email"); the group with the most hits wins
+    hits = [(sum(_contains_term(text_lower, w) for w in words), name) for name, words in groups]
+    best = max(hits, key=lambda h: h[0])
+    return best[1] if best[0] else "Technology"
 
 
 def _extract_skills(text_lower):
     found = []
-    seen = set()
-    for skill in KNOWN_SKILLS:
-        if skill not in seen and _contains_term(text_lower, skill):
-            seen.add(skill)
-            proficiency = "intermediate"
-            if any(w in text_lower for w in [f"expert in {skill}", f"proficient in {skill}", f"strong {skill}"]):
-                proficiency = "expert"
-            elif any(w in text_lower for w in [f"learning {skill}", f"basic {skill}"]):
-                proficiency = "beginner"
-            found.append({"name": skill.title(), "proficiency": proficiency, "duration_months": None, "endorsements": 0})
+    for skill in VOCAB:
+        if not term_in(text_lower, skill):
+            continue
+        proficiency = "intermediate"
+        if any(w in text_lower for w in [f"expert in {skill}", f"proficient in {skill}", f"strong {skill}"]):
+            proficiency = "expert"
+        elif any(w in text_lower for w in [f"learning {skill}", f"basic {skill}"]):
+            proficiency = "beginner"
+        found.append({"name": display(skill), "proficiency": proficiency, "duration_months": None, "endorsements": 0})
     return found
 
 
@@ -402,9 +435,9 @@ def _extract_grade(segment):
 
 def _extract_certifications(text_lower):
     certs = []
-    cert_kws = ["aws certified", "google cloud", "azure certified", "gcp certified",
-                "tensorflow certificate", "coursera", "udemy", "deep learning specialization",
-                "machine learning", "data science", "nlp specialization", "pmp", "cfa"]
+    cert_kws = ["aws certified", "google cloud certified", "azure certified", "gcp certified",
+                "tensorflow certificate", "deep learning specialization", "nlp specialization",
+                "certified kubernetes", "pmp", "cfa"]
     for kw in cert_kws:
         if kw in text_lower:
             certs.append({"name": kw.title(), "issuer": "Online", "year": None})
