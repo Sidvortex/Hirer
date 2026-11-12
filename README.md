@@ -45,7 +45,7 @@
 > **⚠️ Important limitations of the live demo:**
 > - The backend runs on **Render's free tier** — cold starts may take **30–60 seconds** on first load
 > - The live version is **NOT suitable for large datasets** (100K candidates). Free-tier servers have limited RAM and CPU, and processing a full 100K `.jsonl` file **will time out or crash the server**
-> - Semantic scoring (the `all-MiniLM-L6-v2` model) is **disabled** on the live backend to stay within memory limits
+> - Semantic scoring is **disabled** on the live backend to stay within memory limits
 > - For **full functionality** including semantic scoring and large datasets, use the **offline versions** below
 >
 > ### 🔽 Want the full experience? Download an offline release:
@@ -69,13 +69,16 @@
 
 ```mermaid
 graph LR
-    A[📁 candidates.jsonl<br/>100K profiles] --> B[🔍 Keyword Scoring<br/>JD skill matching]
-    A --> C[🤖 Semantic Scoring<br/>all-MiniLM-L6-v2]
-    A --> D[📊 Behavioral Scoring<br/>Platform signals]
+    J[📝 Any job description] --> B
+    J --> C
+    A[📁 Profiles or resumes] --> B[🔍 Skill fit<br/>evidence of the job's skills]
+    A --> C[🤖 Meaning match<br/>bge-small embeddings]
+    A --> D[📊 Availability<br/>activity, notice, location]
     B --> E{⚖️ Weighted Combiner<br/>40% + 35% + 25%}
     C --> E
     D --> E
-    E --> F[🏆 Top 100<br/>submission.csv]
+    E --> R[🔁 Optional re-rank<br/>cross-encoder on the top 200]
+    R --> F[🏆 Ranked shortlist<br/>with reasons]
 ```
 
 </div>
@@ -89,11 +92,12 @@ graph LR
 <td width="50%">
 
 ### 🎯 Ranking Pipeline
-- **Keyword matching** against JD must-haves (embeddings, FAISS, NDCG, etc.)
-- **Sentence transformer** semantic similarity (all-MiniLM-L6-v2)
-- **Behavioral signals** — recency, response rate, GitHub score, open-to-work
-- **Configurable weights** — tune skill/semantic/behavioral balance
-- Runs in ~3 minutes on CPU for 100K candidates
+- **Any job**: pick a built-in role or paste a job description; Hirer reads the skills, experience range and location from it
+- **Skill evidence**, not keyword counting: work described in a job counts more than a bare mention, and synonyms match (`k8s` = Kubernetes)
+- **Meaning match** with a local embedding model, each role scored separately so long careers aren't cut off
+- **Optional re-ranking** of the top candidates with a cross-encoder
+- **Availability signals**: activity, response rate, notice period, location and relocation
+- **Measured**: `scripts/evaluate.py` reports NDCG@10, P@10 and MRR against your own labels
 
 </td>
 <td width="50%">
@@ -103,7 +107,7 @@ graph LR
 - Radial orbital job selector
 - Live job progress tracking with background processing
 - Stacked display cards for top 3 candidates
-- Rerank candidates for different job roles
+- Score breakdown, matched and missing skills for every candidate
 - Export submission CSV directly from browser
 
 </td>
@@ -114,61 +118,78 @@ graph LR
 
 ## 📊 How It Works
 
-### Phase 1 — Keyword Scoring (40%)
-
-Matches candidate text against 24 must-have skills extracted from the JD:
-
-```python
-MUST_HAVE_SKILLS = [
-    'embeddings', 'sentence-transformers', 'vector database',
-    'faiss', 'pinecone', 'python', 'ranking', 'retrieval',
-    'nlp', 'llm', 'ndcg', 'mrr', 'semantic search', ...
-]
+```
+final = 0.40 × skill fit + 0.35 × meaning match + 0.25 × availability
 ```
 
-Also factors in: **years of experience fit** (5-9yr ideal), **current title match**, and **education institution tier**.
+The weights are adjustable. A part that carries no information gives its weight away: with semantic
+matching off, its 35% goes to skill fit.
 
----
+### 1. The job
 
-### Phase 2 — Semantic Scoring (35%)
+Rank against one of 20 built-in roles, or paste any job description. `hirer_core/jobs.py` reads it:
 
-Uses `all-MiniLM-L6-v2` to encode both the JD and candidate profiles into vector space, then measures cosine similarity:
+| Read from the text | How |
+|---|---|
+| Must-have skills | skills from the vocabulary found under "Requirements" (the default section) |
+| Nice-to-have skills | under "Nice to have / Preferred / Bonus", or on a line that says "is a plus" |
+| Unwanted skills | on lines such as "Not looking for: ..." |
+| Experience | "5-9 years", "3+ years", "at least 4 years" |
+| Locations | city names; "remote" |
 
-```
-candidate_text = headline + summary + skills + career descriptions
-semantic_score = cosine_similarity(encode(JD), encode(candidate_text))
-```
+Skills come from one shared vocabulary (`hirer_core/skills.py`, about 160 skills with their other
+spellings). Anything it doesn't know can be added as an extra must-have skill.
 
-This catches candidates who use different terminology but have the right skills.
+### 2. Skill fit (40%)
 
----
+For each must-have skill, how strong is the evidence?
 
-### Phase 3 — Behavioral Scoring (25%)
+| Where the skill appears | Counts as |
+|---|---|
+| In the description of a job they held | 1.0 |
+| In their skills list or a certificate | 0.6 to 1.0 by stated proficiency |
+| Only in the headline or summary | 0.6 |
+| Tested on the platform | the test score is averaged with the claim |
 
-Weights platform engagement signals from `redrob_signals`:
+Matching is whole-word, so `cv` never matches inside `OpenCV`. Unwanted skills reduce the score by 10%
+each (never below 60%). Skill evidence is then combined with experience fit and title match
+(55% / 28% / 17%). College tier is not scored.
+
+### 3. Meaning match (35%)
+
+A sentence-embedding model (`BAAI/bge-small-en-v1.5` by default) encodes the job and each candidate.
+The candidate is split into the profile and each recent role, and the best-matching piece counts, so a
+relevant role isn't diluted by the rest. This catches people who describe the right experience in
+different words. Candidate embeddings are cached, so re-running the same file against another job only
+encodes the job.
+
+**Optional second pass:** a cross-encoder (`cross-encoder/ms-marco-MiniLM-L-6-v2`) re-reads the top 200
+together with the job. It is slower but more accurate at the top of the list, which is where it matters.
+
+### 4. Availability (25%)
+
+For platform profiles, from `redrob_signals`:
 
 | Signal | Weight | Logic |
 |--------|--------|-------|
-| Last active | 25% | ≤7 days = 1.0, >90 days = 0.1 |
+| Last active | 25% | within 7 days = 1.0, over 90 days = 0.1, measured from the newest date in the file |
 | Open to work | 20% | True = 1.0, False = 0.3 |
-| Response rate | 20% | Direct float score |
-| GitHub score | 15% | score/100, -1 = 0.3 penalty |
-| Response time | 10% | ≤2hrs = 1.0, >72hrs = 0.1 |
-| Notice period | 10% | ≤30 days = 1.0 |
+| Response rate | 20% | as given |
+| GitHub score | 15% | score/100; no GitHub linked = 0.3 |
+| Response time | 10% | within 2 hours = 1.0, over 72 hours = 0.1 |
+| Location | 10% | in the job's location = 1.0, willing to relocate = 0.8, otherwise 0.2 |
+| Profile completeness | 5% | score/100 |
+| Notice period | 5% | 30 days or less = 1.0 |
+| Interview completion | 5% | as given |
 
----
+(The weights are rescaled to add up to 100%.) For resumes there is no platform data, so availability
+comes from the details the candidate or recruiter supplies: notice period, open to work, location and
+relocation. Blank answers are neutral.
 
-### Phase 4 — Weighted Combination
+### 5. Scores
 
-```python
-final_score = (
-    0.40 * normalize(skill_score) +
-    0.35 * normalize(semantic_score) +
-    0.25 * normalize(behavioral_score)
-)
-```
-
-All components are min-max normalized before combining. Sort descending, take top N.
+Profile files are scored relative to each other (each part is min-max normalized over the file).
+Resume uploads keep absolute scores, so 70% means the same whether you upload 1 resume or 50.
 
 ---
 
@@ -178,8 +199,8 @@ All components are min-max normalized before combining. Sort descending, take to
 
 | Layer | Technology |
 |-------|-----------|
-| **ML Pipeline** | Python, sentence-transformers, scikit-learn, pandas, numpy |
-| **Backend** | FastAPI, uvicorn, SSE streaming |
+| **ML Pipeline** | Python, sentence-transformers (bi-encoder + cross-encoder), numpy |
+| **Backend** | FastAPI, uvicorn, SQLite job store, pdfplumber + Tesseract OCR |
 | **Frontend** | Next.js 15, TypeScript, Tailwind CSS |
 | **Animations** | Framer Motion |
 | **UI Components** | shadcn/ui, lucide-react |
@@ -194,14 +215,21 @@ All components are min-max normalized before combining. Sort descending, take to
 ```
 Hirer/
 ├── 📂 hirer_core/           # Scoring code shared by the CLI and the backend
-│   ├── jd.py               # job description and keyword lists
-│   ├── features.py         # skill, experience, title, education, availability scores
+│   ├── skills.py           # skill vocabulary and synonyms
+│   ├── jobs.py             # built-in jobs; reads pasted job descriptions
+│   ├── features.py         # skill evidence, experience, title, availability scores
+│   ├── semantic.py         # embedding model, cache, cross-encoder re-ranker
 │   ├── scoring.py          # combines scores, ranks, writes reasoning
 │   └── utils.py            # loading, whole-word matching, normalization
-├── 📂 hirer-backend/        # FastAPI server: API, resume extraction, resume forms
+├── 📂 hirer-backend/        # FastAPI server
+│   ├── main.py             # API endpoints, limits, access code
+│   ├── extractor.py        # resume text (two-column aware, OCR) to a structured candidate
+│   ├── resumes.py          # form edits, detail files, single-resume job matching
+│   └── store.py            # job records in SQLite
 ├── 📂 hirer-frontend/       # Next.js web app
 ├── 📂 scripts/
 │   ├── rank.py             # command-line ranker
+│   ├── evaluate.py         # NDCG / MRR against your labels, weight tuning
 │   ├── validate_output.py  # checks a ranked CSV's format
 │   └── start.sh            # starts backend + frontend together
 ├── 📂 tests/                # pytest suite
@@ -209,7 +237,8 @@ Hirer/
 ├── 📂 docs/                 # documentation, presentation, exploration notebook
 ├── 🐳 Dockerfile            # backend image (build from the repo root)
 ├── 🚂 railway.json          # Railway deploy config
-└── requirements.txt        # CLI dependencies
+├── 📂 .github/workflows/    # tests on every push
+└── requirements.txt        # everything for local use
 ```
 
 ---
@@ -251,18 +280,61 @@ Run from the repo root:
 ```bash
 pip install -r requirements.txt
 
-# rank candidates
-python scripts/rank.py --candidates /path/to/candidates.jsonl --out output/submission.csv
+# rank the sample against the built-in Senior AI Engineer job (downloads the models on first run)
+python scripts/rank.py --candidates data/candidates_small.jsonl
 
 # fast mode (no semantic scoring)
-python scripts/rank.py --candidates /path/to/candidates.jsonl --out output/submission.csv --no-semantic
+python scripts/rank.py --candidates data/candidates_small.jsonl --no-semantic
 
-# check the output format
+# rank against your own job description, and re-read the top 200 with the cross-encoder
+python scripts/rank.py --candidates data/candidates_small.jsonl --job my_job.txt --rerank
+
+# rank against a built-in job (1-20; see hirer_core/jobs.py)
+python scripts/rank.py --candidates data/candidates_small.jsonl --preset 14
+
+# check the output format (expects exactly 100 rows)
 python scripts/validate_output.py output/submission.csv
 
 # tests
 python -m pytest -q
 ```
+
+### Measure the ranking
+
+Rankings are only as good as you can show them to be. Label a sample, then score it:
+
+```bash
+python scripts/evaluate.py sheet --candidates data/candidates_small.jsonl   # writes data/labels.csv (150 rows)
+# fill the "label" column: 3 strong fit, 2 good, 1 weak, 0 not a fit
+python scripts/evaluate.py score --candidates data/candidates_small.jsonl --semantic --tune
+```
+
+`score` prints NDCG@10, P@10 and MRR for the current weights; `--tune` searches for better ones.
+Use it before and after any change to the scoring.
+
+### Settings
+
+All optional, set as environment variables.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `HIRER_EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | embedding model: a Hugging Face name or a local folder (for example your own fine-tuned model) |
+| `HIRER_RERANK_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | cross-encoder for the second pass |
+| `HIRER_EMBED_CHUNKS` | `3` | pieces per candidate: the profile plus this many minus one recent roles |
+| `HIRER_RERANK_TOP_K` | `200` | how many top candidates the second pass re-reads |
+| `HIRER_CACHE_DIR` | `~/.cache/hirer` | cached candidate embeddings |
+| `HIRER_DISABLE_SEMANTIC` | off | `1` switches the models off (for servers with little memory) |
+| `HIRER_OCR_LANG` | `eng` | Tesseract languages for scanned resumes, for example `eng+hin` |
+| `HIRER_VERIFY_GITHUB` | off | `1` looks up GitHub accounts named on resumes (`GITHUB_TOKEN` raises the request limit) |
+| `HIRER_DATA_DIR` | system temp folder | job records and results |
+| `HIRER_RETENTION_MINUTES` | `60` | how long results are kept; uploaded files are deleted as soon as they are read |
+| `HIRER_ACCESS_CODE` | none | if set, the recruiter tools (profile files and resume ZIPs) ask for this code |
+| `RATE_LIMIT_PER_MIN` | `0` (off) | uploads allowed per minute from one address |
+| `JSONL_ENTRY_LIMIT`, `PDF_COUNT_LIMIT`, `PDF_SIZE_LIMIT_MB` | `0` (off) | upload size limits |
+| `FRONTEND_URL` | none | extra allowed frontend origins, comma-separated |
+
+For other languages, use a multilingual embedding model such as `intfloat/multilingual-e5-small`
+(the skill vocabulary itself is English).
 
 ---
 
@@ -285,19 +357,37 @@ npm install && npm run dev
 
 ---
 
+### Deploy the backend on Railway
+
+The repo root has a `Dockerfile` and `railway.json`, so Railway needs no build settings.
+
+1. In Railway: **New Project → GitHub Repo →** this repository. It builds the Dockerfile and checks `/health`.
+2. In the service's **Variables**, add `FRONTEND_URL` = your frontend's address (for example `https://your-app.vercel.app`).
+   Optional: `HIRER_ACCESS_CODE` to keep the recruiter tools private.
+3. **Settings → Networking → Generate Domain** to get the public URL.
+4. Optional: right-click the service → **Attach Volume**, mount path `/data`, so results and cached
+   embeddings survive redeploys.
+5. In Vercel, set `NEXT_PUBLIC_API_URL` to the Railway URL (no trailing slash) and redeploy the frontend.
+
+Semantic matching loads PyTorch and two models, which needs roughly 1 GB of memory. On a plan with less,
+set `HIRER_DISABLE_SEMANTIC=1`; keyword ranking and resume reading (including OCR) still work.
+
+---
+
 ## 🎮 Using the Web App
 
 ```
-Bulk JSON          →  upload candidates.jsonl, set weights, run
+Bulk JSON          →  pick a job on the wheel or paste a job description (Hirer shows the
+                       skills it read from it), upload candidates.jsonl, set weights, run
                        results: top 3 cards, full table with skill / semantic / behavioral
-                       scores, the weights actually used, download submission.csv
+                       scores, the weights actually used, download the ranked CSV
 
 Single Resume      →  upload a PDF or image resume
                        "Check your details" form, pre-filled from the resume:
                        fix name / title / years / skills / location, add notice period,
                        relocation and the role you want, then see matches across 20 roles
 
-Bulk Resume ZIP    →  upload a ZIP of resumes, set weights, run
+Bulk Resume ZIP    →  pick or paste a job, upload a ZIP of resumes, set weights, run
                        Hirer reads every resume, then lists the ones missing details
                        (notice period, open to work, location, relocation) with a short
                        form each. If every resume already has details, ranking starts
