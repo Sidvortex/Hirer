@@ -12,9 +12,36 @@ import { Briefcase, Code, Search, BarChart2, Brain, Sparkles, Upload, GitBranch,
 
 const API = process.env.NEXT_PUBLIC_API_URL!;
 
-// Live server limits
-const JSONL_LIMIT = 1000;
-const PDF_LIMIT   = 50;
+// what the backend allows; fetched from /config (null until it answers)
+interface ServerConfig {
+  jsonl_limit: number;
+  pdf_limit: number;
+  size_limit_mb: number;
+  access_required: boolean;
+  semantic_available: boolean;
+  embed_model: string;
+  retention_minutes: number;
+}
+
+// the job a ranking is scored against: a built-in one, or a pasted description
+interface JobChoice { preset: number | null; text: string; extraSkills: string; }
+
+interface ParsedJob {
+  title: string;
+  must_have: string[];
+  nice_to_have: string[];
+  negative: string[];
+  years: [number, number | null] | null;
+  locations: string[];
+}
+
+interface RunSettings {
+  file: File; w1: number; w2: number; w3: number; topN: number;
+  semantic: boolean; rerank: boolean; job: JobChoice; accessCode: string;
+}
+
+const yearsLabel = (y: ParsedJob["years"]) => (!y ? "" : y[1] ? `${y[0]}-${y[1]} yrs` : `${y[0]}+ yrs`);
+const accessHeader = (code: string): Record<string, string> => (code ? { "X-Access-Code": code } : {});
 
 type Screen = "boot" | "home" | "mode-select" | "select" | "loading" | "results" | "single-upload" | "single-form" | "single-result" | "bulk-extract" | "bulk-review" | "bulk-rank" | "about" | "error";
 type UploadMode = "jsonl" | "single-pdf" | "bulk-pdf";
@@ -28,7 +55,9 @@ interface Candidate {
   skill?: number;
   semantic?: number;
   behavioral?: number;
+  rerank?: number;
   matched_skills?: string[];
+  missing_skills?: string[];
 }
 
 interface RankMeta {
@@ -37,6 +66,8 @@ interface RankMeta {
   reference_date: string;
   job_title: string;
   relative?: boolean;
+  reranked?: boolean;
+  job?: ParsedJob;
 }
 
 interface JobMatch {
@@ -89,6 +120,7 @@ interface SingleResult {
   candidate: {
     name: string; current_title: string; years_of_experience: number; skills_found: string[]; location: string; industry: string;
     notice_period_days?: number | null; willing_to_relocate?: boolean | null; expected_role?: string;
+    github?: { username: string; public_repos: number; followers: number; last_active: string } | null;
   };
   job_matches: JobMatch[];
   best_match: string;
@@ -150,10 +182,6 @@ const TEAM = [
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 function BootScreen({ onDone }: { onDone: () => void }) {
-  // silently wake up the backend while the animation plays (hosted instances may be asleep)
-  useEffect(() => {
-    fetch(`${API}/health`).catch(() => {});
-  }, []);
   return (
     <div className="min-h-screen bg-black flex items-center justify-center relative">
       <HandWrittenTitle title="Hirer" subtitle="Candidate Ranking System" />
@@ -176,11 +204,11 @@ function BootScreen({ onDone }: { onDone: () => void }) {
 
 // ─── Home ─────────────────────────────────────────────────────────────────────
 // ─── Mode Select ──────────────────────────────────────────────────────────────
-function ModeSelectScreen({ onSelect, onBack }: { onSelect: (mode: UploadMode) => void; onBack: () => void }) {
+function ModeSelectScreen({ config, onSelect, onBack }: { config: ServerConfig | null; onSelect: (mode: UploadMode) => void; onBack: () => void }) {
   const modes = [
-    { id:"jsonl" as UploadMode,     icon:Database, title:"Bulk JSON Ranking",  desc:"Upload candidates.jsonl with structured profiles. Rank up to 100K candidates.",      tag:"Challenge Format", limit:`⚠ Live server: max ${JSONL_LIMIT.toLocaleString()} entries`,              color:"border-blue-500/30 hover:border-blue-400" },
+    { id:"jsonl" as UploadMode,     icon:Database, title:"Bulk JSON Ranking",  desc:"Upload candidates.jsonl with structured profiles. Rank up to 100K candidates against any job.", tag:"For Recruiters", limit: config?.jsonl_limit ? `⚠ This server: max ${config.jsonl_limit.toLocaleString()} entries` : null, color:"border-blue-500/30 hover:border-blue-400" },
     { id:"single-pdf" as UploadMode,icon:FileText, title:"Single Resume",      desc:"Upload one PDF or image resume. Get ranked job matches across 20 role categories.",  tag:"For Job Seekers",  limit:null,                                                                    color:"border-green-500/30 hover:border-green-400" },
-    { id:"bulk-pdf" as UploadMode,  icon:Archive,  title:"Bulk Resume ZIP",    desc:"Upload a ZIP of PDF or image resumes. Auto-extract info and rank all candidates.",   tag:"For Recruiters",   limit:`⚠ Live server: max ${PDF_LIMIT} files per ZIP (50 MB)`,                color:"border-purple-500/30 hover:border-purple-400" },
+    { id:"bulk-pdf" as UploadMode,  icon:Archive,  title:"Bulk Resume ZIP",    desc:"Upload a ZIP of PDF or image resumes. Auto-extract info and rank all candidates.",   tag:"For Recruiters",   limit: config?.pdf_limit ? `⚠ This server: max ${config.pdf_limit} files per ZIP (${config.size_limit_mb} MB)` : null, color:"border-purple-500/30 hover:border-purple-400" },
   ];
   return (
     <div className="min-h-screen bg-neutral-950 text-white flex items-center justify-center px-6">
@@ -251,13 +279,40 @@ function downloadDetailsTemplate() {
 
 function SelectScreen({
   mode,
+  config,
   onRun,
   onBack,
 }: {
   mode: UploadMode;
-  onRun: (file: File, w1: number, w2: number, w3: number, topN: number, semantic: boolean) => void;
+  config: ServerConfig | null;
+  onRun: (settings: RunSettings) => void;
   onBack: () => void;
 }) {
+  const [presetId, setPresetId] = useState(1);
+  const [custom, setCustom] = useState(false);
+  const [jobText, setJobText] = useState("");
+  const [extraSkills, setExtraSkills] = useState("");
+  const [parsed, setParsed] = useState<ParsedJob | null>(null);
+  const [rerank, setRerank] = useState(false);
+  const [accessCode, setAccessCode] = useState("");
+  const canSemantic = config?.semantic_available !== false;
+
+  // show what Hirer read out of the pasted description, shortly after typing stops
+  useEffect(() => {
+    if (!custom || jobText.trim().length < 20) return;
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API}/parse-job`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: jobText, extra_skills: extraSkills }),
+        });
+        if (res.ok) setParsed(await res.json());
+      } catch { /* the preview is optional; ranking reports real errors */ }
+    }, 500);
+    return () => clearTimeout(t);
+  }, [custom, jobText, extraSkills]);
+
   const [w1, setW1] = useState(40);
   const [w2, setW2] = useState(35);
   const [w3, setW3] = useState(25);
@@ -267,6 +322,7 @@ function SelectScreen({
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const total = w1 + w2 + w3;
+  const jobMissing = custom && jobText.trim().length < 20;
 
   const accept    = mode === "bulk-pdf" ? ".zip" : ".jsonl,.json";
   const dropLabel = mode === "bulk-pdf"
@@ -286,28 +342,74 @@ function SelectScreen({
         <button onClick={onBack} className="font-mono text-xs text-white/30 hover:text-white transition-colors">← back</button>
       </div>
       <div className="absolute top-6 left-1/2 -translate-x-1/2 z-10 font-mono text-xs text-white/20 tracking-widest">
-        CLICK A JOB TO SELECT IT
+        CLICK A JOB TO RANK AGAINST IT
       </div>
       <div className="absolute inset-0 z-0 pb-64">
-        <RadialOrbitalTimeline timelineData={JOB_DATA} />
+        <RadialOrbitalTimeline timelineData={JOB_DATA} onSelect={(id) => { setPresetId(id); setCustom(false); }} />
       </div>
-      <div className="absolute bottom-0 left-0 right-0 z-20 bg-black/90 backdrop-blur-md border-t border-white/10 p-4">
+      <div className="absolute bottom-0 left-0 right-0 z-20 bg-black/90 backdrop-blur-md border-t border-white/10 p-4 max-h-[80vh] overflow-y-auto">
         <div className="max-w-3xl mx-auto space-y-3">
 
+          {/* which job to rank against */}
+          <div className="flex items-center gap-2 font-mono text-[10px]">
+            <span className="text-white/30 tracking-widest mr-1">RANK AGAINST</span>
+            <button type="button" onClick={() => setCustom(false)}
+              className={`px-3 py-1.5 border transition-colors ${!custom ? "border-white text-white" : "border-white/15 text-white/30 hover:border-white/40"}`}>
+              {JOB_DATA.find((j) => j.id === presetId)?.title}
+            </button>
+            <button type="button" onClick={() => setCustom(true)}
+              className={`px-3 py-1.5 border transition-colors ${custom ? "border-white text-white" : "border-white/15 text-white/30 hover:border-white/40"}`}>
+              paste a job description
+            </button>
+          </div>
+          {custom && (
+            <div className="space-y-2">
+              <textarea value={jobText} onChange={(e) => setJobText(e.target.value)} rows={4}
+                placeholder={"Paste the job description here. Put the job title on the first line.\nHirer reads the required skills, nice-to-haves, experience range and location from it."}
+                className="w-full bg-transparent border border-white/15 focus:border-white/50 outline-none px-3 py-2 font-mono text-xs text-white placeholder:text-white/20 resize-y" />
+              <input value={extraSkills} onChange={(e) => setExtraSkills(e.target.value)}
+                placeholder="extra must-have skills Hirer should look for, comma separated (optional)"
+                className="w-full bg-transparent border border-white/15 focus:border-white/50 outline-none px-3 py-1.5 font-mono text-xs text-white placeholder:text-white/20" />
+              {parsed && !jobMissing && (
+                <div className="font-mono text-[10px] text-white/40 leading-relaxed">
+                  {parsed.must_have.length > 0 ? (
+                    <>
+                      <span className="text-white/60">{parsed.title}</span>
+                      {" · must have: "}<span className="text-white/70">{parsed.must_have.join(", ")}</span>
+                      {parsed.nice_to_have.length > 0 && <>{" · nice to have: "}{parsed.nice_to_have.join(", ")}</>}
+                      {parsed.negative.length > 0 && <>{" · not wanted: "}{parsed.negative.join(", ")}</>}
+                      {parsed.years && <>{" · "}{yearsLabel(parsed.years)}</>}
+                      {parsed.locations.length > 0 && <>{" · "}{parsed.locations.join(", ")}</>}
+                    </>
+                  ) : (
+                    <span className="text-yellow-500/70">
+                      No skills recognised yet. Add must-have skills above, or turn on semantic scoring.
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          {config?.access_required && (
+            <input type="password" value={accessCode} onChange={(e) => setAccessCode(e.target.value)}
+              placeholder="access code for this server"
+              className="w-full bg-transparent border border-white/15 focus:border-white/50 outline-none px-3 py-1.5 font-mono text-xs text-white placeholder:text-white/20" />
+          )}
+
           {/* live server limit warnings */}
-          {mode === "jsonl" && (
+          {mode === "jsonl" && !!config?.jsonl_limit && (
             <div className="flex items-center gap-2 border border-yellow-500/20 bg-yellow-500/5 px-3 py-2">
               <AlertTriangle size={11} className="text-yellow-500/70 flex-shrink-0" />
               <span className="font-mono text-[10px] text-yellow-500/70">
-                Live server limit: {JSONL_LIMIT.toLocaleString()} entries max. No limit for local runs.
+                This server takes up to {config.jsonl_limit.toLocaleString()} entries per file. No limit for local runs.
               </span>
             </div>
           )}
-          {mode === "bulk-pdf" && (
+          {mode === "bulk-pdf" && !!config?.pdf_limit && (
             <div className="flex items-center gap-2 border border-yellow-500/20 bg-yellow-500/5 px-3 py-2">
               <AlertTriangle size={11} className="text-yellow-500/70 flex-shrink-0" />
               <span className="font-mono text-[10px] text-yellow-500/70">
-                Live server limit: {PDF_LIMIT} files max per ZIP, 50 MB max size. No limit for local runs.
+                This server takes up to {config.pdf_limit} files per ZIP, {config.size_limit_mb} MB max. No limit for local runs.
               </span>
             </div>
           )}
@@ -361,18 +463,30 @@ function SelectScreen({
             <div className={`font-mono text-xs ${total === 100 ? "text-white/30" : "text-red-400"}`}>
               weights total: {total}% {total === 100 ? "✓" : "← must be 100"}
             </div>
-            <label className="flex items-center gap-2 font-mono text-xs text-white/30 cursor-pointer">
-              <input type="checkbox" checked={semantic} onChange={(e) => setSemantic(e.target.checked)} className="accent-white" />
-              semantic scoring (slower)
-            </label>
+            <div className="flex items-center gap-4">
+              <label className={`flex items-center gap-2 font-mono text-xs text-white/30 ${canSemantic ? "cursor-pointer" : "opacity-50"}`}>
+                <input type="checkbox" checked={semantic} disabled={!canSemantic} onChange={(e) => setSemantic(e.target.checked)} className="accent-white" />
+                {canSemantic ? "semantic scoring (slower)" : "semantic scoring (off on this server)"}
+              </label>
+              {canSemantic && (
+                <label className="flex items-center gap-2 font-mono text-xs text-white/30 cursor-pointer"
+                  title="A second model re-reads the top 200 candidates together with the job. More accurate at the top of the list.">
+                  <input type="checkbox" checked={rerank} onChange={(e) => setRerank(e.target.checked)} className="accent-white" />
+                  re-rank the top (slowest)
+                </label>
+              )}
+            </div>
           </div>
 
           <button
-            onClick={() => file && total === 100 && onRun(file, w1 / 100, w2 / 100, w3 / 100, topN, semantic)}
-            disabled={!file || total !== 100}
+            onClick={() => file && total === 100 && !jobMissing && onRun({
+              file, w1: w1 / 100, w2: w2 / 100, w3: w3 / 100, topN, semantic, rerank, accessCode,
+              job: custom ? { preset: null, text: jobText, extraSkills } : { preset: presetId, text: "", extraSkills: "" },
+            })}
+            disabled={!file || total !== 100 || jobMissing}
             className="w-full bg-white text-black font-mono text-sm py-3 hover:bg-white/90 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
           >
-            {!file ? "↑ UPLOAD A FILE FIRST" : total !== 100 ? "FIX WEIGHTS TO = 100" : "RUN PIPELINE →"}
+            {!file ? "↑ UPLOAD A FILE FIRST" : total !== 100 ? "FIX WEIGHTS TO = 100" : jobMissing ? "PASTE A JOB DESCRIPTION FIRST" : "RUN PIPELINE →"}
           </button>
         </div>
       </div>
@@ -757,7 +871,13 @@ function SingleResultScreen({ result, onBack }: { result: SingleResult; onBack: 
               c.willing_to_relocate === true && "open to relocate",
               c.willing_to_relocate === false && "not relocating",
               c.expected_role && `wants: ${c.expected_role}`].filter(Boolean).join(" · ")}
+            {(c.notice_period_days != null || c.willing_to_relocate != null || c.expected_role) && " (as you entered)"}
           </p>
+          {c.github && (
+            <p className="font-mono text-[10px] text-green-400/70 mb-3">
+              GitHub checked: @{c.github.username} · {c.github.public_repos} public repos · last active {c.github.last_active}
+            </p>
+          )}
           <div className="flex flex-wrap gap-2">
             {c.skills_found.map(s => (<span key={s} className="font-mono text-[10px] border border-white/15 text-white/50 px-2 py-1">{s}</span>))}
           </div>
@@ -818,74 +938,6 @@ function SingleResultScreen({ result, onBack }: { result: SingleResult; onBack: 
   );
 }
 
-// ─── Loading ───────────────────────────────────────────────────────────────────
-function RealLoadingScreen({
-  file, w1, w2, w3, topN, semantic, mode,
-  onDone, onError,
-}: {
-  file: File; w1: number; w2: number; w3: number; topN: number; semantic: boolean; mode: UploadMode;
-  onDone: (jobId: string, results: Candidate[], meta: RankMeta | null) => void;
-  onError: (msg: string) => void;
-}) {
-  const [steps, setSteps] = useState<string[]>([]);
-  const [pct, setPct] = useState(0);
-  const started = useRef(false);
-
-  useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-
-    async function run() {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("skill_weight", String(w1));
-      formData.append("semantic_weight", String(w2));
-      formData.append("behavioral_weight", String(w3));
-      formData.append("top_n", String(topN));
-      formData.append("use_semantic", String(semantic));
-
-      try {
-        // kick off the job — returns job_id immediately
-        const res = await fetch(`${API}/rank`, { method: "POST", body: formData });
-        if (!res.ok) { const err = await res.json(); onError(err.detail || "Server error"); return; }
-        const { job_id: jobId } = await res.json();
-
-        // 2. poll /status/{job_id} every second until done or error
-        let seenSteps = 0;
-        while (true) {
-          await new Promise((r) => setTimeout(r, 1000));
-
-          const statusRes = await fetch(`${API}/status/${jobId}`);
-          if (!statusRes.ok) { onError("Lost track of the job. Please try again."); return; }
-          const status = await statusRes.json();
-
-          // only append newly-seen steps so we don't duplicate them each poll
-          if (status.steps && status.steps.length > seenSteps) {
-            setSteps((s) => [...s, ...status.steps.slice(seenSteps)]);
-            seenSteps = status.steps.length;
-          }
-          setPct(status.pct);
-
-          if (status.status === "error") { onError(status.error || "Something went wrong"); return; }
-
-          if (status.status === "done") {
-            setPct(100);
-            const preview = await fetch(`${API}/preview/${jobId}?limit=100`);
-            const previewData = await preview.json();
-            onDone(jobId, previewData.results, previewData.meta ?? null);
-            return;
-          }
-        }
-      } catch (e: unknown) {
-        onError(e instanceof Error ? e.message : "Cannot connect to backend. Make sure it is running on port 8000.");
-      }
-    }
-    run();
-  }, []);
-
-  return <LoadingPage steps={steps.length ? steps : ["Connecting to backend..."]} pct={pct} />;
-}
-
 // ─── Results ──────────────────────────────────────────────────────────────────
 function ResultsScreen({
   results,
@@ -901,7 +953,6 @@ function ResultsScreen({
   onAbout: () => void;
 }) {
   const displayed = results;
-  const job = JOB_DATA[0];
   const pct = (x?: number) => (x === undefined ? "–" : `${Math.round(x * 100)}`);
 
   const top3 = displayed.slice(0, 3);
@@ -943,8 +994,22 @@ function ResultsScreen({
         {/* Left — what this ranking was scored against */}
         <div className="w-80 flex-shrink-0 border-r border-white/10 px-6 py-8 overflow-y-auto" style={{ height: "calc(100vh - 57px)" }}>
           <p className="font-mono text-[10px] text-white/25 mb-3 tracking-widest">SCORED AGAINST</p>
-          <h2 className="font-mono text-sm text-white mb-1">{meta?.job_title ?? job.title}</h2>
-          <p className="font-mono text-[10px] text-white/40 leading-relaxed mb-8">{job.content}</p>
+          <h2 className="font-mono text-sm text-white mb-2">{meta?.job_title ?? "Senior AI Engineer"}</h2>
+          {meta?.job && (
+            <div className="mb-8">
+              <p className="font-mono text-[10px] text-white/40 mb-2">
+                {[yearsLabel(meta.job.years), meta.job.locations.join(", ")].filter(Boolean).join(" · ")}
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {meta.job.must_have.map((sk) => (
+                  <span key={sk} className="font-mono text-[9px] border border-white/15 text-white/50 px-1.5 py-0.5">{sk}</span>
+                ))}
+              </div>
+              {meta.job.nice_to_have.length > 0 && (
+                <p className="font-mono text-[9px] text-white/25 mt-2 leading-relaxed">nice to have: {meta.job.nice_to_have.join(", ")}</p>
+              )}
+            </div>
+          )}
 
           {meta && (
             <>
@@ -969,6 +1034,11 @@ function ResultsScreen({
                   ? "scores are absolute: 100% would be a perfect fit, however many resumes you upload"
                   : `scores are relative to this file · activity measured from ${meta.reference_date}`}
               </p>
+              {meta.reranked && (
+                <p className="font-mono text-[9px] text-white/25 leading-relaxed mt-4">
+                  The top of the list was re-read by a second model that looks at the job and each candidate together.
+                </p>
+              )}
             </>
           )}
         </div>
@@ -996,7 +1066,7 @@ function ResultsScreen({
                 <div key={c.candidate_id} className="grid grid-cols-[36px_160px_1fr_110px_70px] gap-3 px-4 py-2.5 border-t border-white/5 hover:bg-white/5 transition-colors font-mono text-[10px]">
                   <span className="text-white/25">{c.rank}</span>
                   <span className="text-white/80 truncate">{c.name || c.candidate_id}</span>
-                  <span className="text-white/35 truncate" title={c.matched_skills?.length ? `matched: ${c.matched_skills.join(", ")}` : undefined}>{c.reasoning}</span>
+                  <span className="text-white/35 truncate" title={[c.matched_skills?.length ? `matched: ${c.matched_skills.join(", ")}` : "", c.missing_skills?.length ? `missing: ${c.missing_skills.join(", ")}` : ""].filter(Boolean).join("\n") || undefined}>{c.reasoning}</span>
                   <span className="text-white/40">{pct(c.skill)} / {pct(c.semantic)} / {pct(c.behavioral)}</span>
                   <span className="text-white/60">{(c.score * 100).toFixed(1)}%</span>
                 </div>
@@ -1106,9 +1176,13 @@ export default function Home() {
   const [extractId, setExtractId]     = useState("");
   const [extracted, setExtracted]     = useState<{ resumes: ExtractedResume[]; skipped: string[] } | null>(null);
   const [bulkEdits, setBulkEdits]     = useState<Record<string, ResumeEdits>>({});
-  const [uploadState, setUploadState] = useState<{
-    file: File; w1: number; w2: number; w3: number; topN: number; semantic: boolean;
-  } | null>(null);
+  const [uploadState, setUploadState] = useState<RunSettings | null>(null);
+  const [config, setConfig]           = useState<ServerConfig | null>(null);
+
+  // ask the backend what it allows; this also wakes a sleeping hosted instance
+  useEffect(() => {
+    fetch(`${API}/config`).then((r) => (r.ok ? r.json() : null)).then(setConfig).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (screen !== "boot") return;
@@ -1125,10 +1199,18 @@ export default function Home() {
     setScreen(m === "single-pdf" ? "single-upload" : "select");
   };
 
-  const handleRun = (file: File, w1: number, w2: number, w3: number, topN: number, semantic: boolean) => {
-    setUploadState({ file, w1, w2, w3, topN, semantic });
+  const handleRun = (settings: RunSettings) => {
+    setUploadState(settings);
     setScreen(mode === "bulk-pdf" ? "bulk-extract" : "loading");
   };
+
+  // the job and options every ranking request carries
+  const jobFields = (u: RunSettings) => ({
+    skill_weight: u.w1, semantic_weight: u.w2, behavioral_weight: u.w3, top_n: u.topN,
+    use_semantic: u.semantic, use_rerank: u.rerank,
+    ...(u.job.preset !== null ? { job_preset: u.job.preset } : {}),
+    job_text: u.job.text, extra_skills: u.job.extraSkills,
+  });
 
   const fail = (msg: string) => { setErrorMsg(msg); setScreen("error"); };
 
@@ -1143,7 +1225,7 @@ export default function Home() {
       <motion.div key={screen} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.35 }} className="min-h-screen">
         {screen === "boot"          && <BootScreen onDone={() => setScreen("home")} />}
         {screen === "home"          && <HomeScreen onStart={() => setScreen("mode-select")} onAbout={goAbout} />}
-        {screen === "mode-select"   && <ModeSelectScreen onSelect={handleModeSelect} onBack={() => setScreen("home")} />}
+        {screen === "mode-select"   && <ModeSelectScreen config={config} onSelect={handleModeSelect} onBack={() => setScreen("home")} />}
         {screen === "single-upload" && (
           <SinglePDFScreen
             onBack={() => setScreen("mode-select")}
@@ -1161,7 +1243,11 @@ export default function Home() {
         )}
         {screen === "bulk-extract" && uploadState && (
           <JobScreen
-            start={() => { const fd = new FormData(); fd.append("file", uploadState.file); return fetch(`${API}/extract-bulk`, { method: "POST", body: fd }); }}
+            start={() => {
+              const fd = new FormData();
+              fd.append("file", uploadState.file);
+              return fetch(`${API}/extract-bulk`, { method: "POST", body: fd, headers: accessHeader(uploadState.accessCode) });
+            }}
             onDone={async (jid) => {
               const data = await (await fetch(`${API}/extracted/${jid}`)).json();
               setExtractId(jid); setExtracted(data); setBulkEdits({});
@@ -1183,12 +1269,8 @@ export default function Home() {
           <JobScreen
             start={() => fetch(`${API}/rank-bulk`, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                extract_job_id: extractId, edits: bulkEdits,
-                skill_weight: uploadState.w1, semantic_weight: uploadState.w2, behavioral_weight: uploadState.w3,
-                top_n: uploadState.topN, use_semantic: uploadState.semantic,
-              }),
+              headers: { "Content-Type": "application/json", ...accessHeader(uploadState.accessCode) },
+              body: JSON.stringify({ extract_job_id: extractId, edits: bulkEdits, ...jobFields(uploadState) }),
             })}
             onDone={loadResults}
             onError={fail}
@@ -1197,13 +1279,17 @@ export default function Home() {
         {screen === "single-result" && singleResult && (
           <SingleResultScreen result={singleResult} onBack={() => setScreen("single-upload")} />
         )}
-        {screen === "select"  && <SelectScreen mode={mode} onRun={handleRun} onBack={() => setScreen("mode-select")} />}
+        {screen === "select"  && <SelectScreen mode={mode} config={config} onRun={handleRun} onBack={() => setScreen("mode-select")} />}
         {screen === "loading" && uploadState && (
-          <RealLoadingScreen
-            {...uploadState}
-            mode={mode}
-            onDone={(jid, res, m) => { setJobId(jid); setResults(res); setMeta(m); setScreen("results"); }}
-            onError={(msg) => { setErrorMsg(msg); setScreen("error"); }}
+          <JobScreen
+            start={() => {
+              const fd = new FormData();
+              fd.append("file", uploadState.file);
+              Object.entries(jobFields(uploadState)).forEach(([k, v]) => fd.append(k, String(v)));
+              return fetch(`${API}/rank`, { method: "POST", body: fd, headers: accessHeader(uploadState.accessCode) });
+            }}
+            onDone={loadResults}
+            onError={fail}
           />
         )}
         {screen === "results" && (
