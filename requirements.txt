@@ -1,7 +1,5 @@
-pandas
-numpy
-scikit-learn
-sentence-transformers
-tqdm
-pyyaml
+# everything for running Hirer locally: the backend, the scripts and the tests
+-r hirer-backend/requirements.txt
 pytest
+httpx
+reportlab

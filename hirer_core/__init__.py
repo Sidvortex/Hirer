@@ -1,3 +1,4 @@
 """Hirer's scoring code, shared by the CLI (scripts/rank.py) and the web backend."""
 
-from .scoring import rank, DEFAULT_WEIGHTS  # noqa: F401
+from .jobs import DEFAULT_JOB, PRESETS, Job, get_job, parse_job  # noqa: F401
+from .scoring import DEFAULT_WEIGHTS, rank  # noqa: F401

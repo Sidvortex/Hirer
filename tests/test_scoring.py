@@ -1,16 +1,10 @@
-"""Run from the repo root: python -m pytest -q"""
-
-import os
-import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
-from hirer_core import rank                                        # noqa: E402
-from hirer_core.features import skill_matches, behavioral_score    # noqa: E402
-from hirer_core.scoring import effective_weights                   # noqa: E402
-from hirer_core.utils import contains_term, reference_date, normalize_0_1  # noqa: E402
+from hirer_core import rank
+from hirer_core.features import skill_matches, behavioral_score
+from hirer_core.scoring import effective_weights
+from hirer_core.utils import contains_term, reference_date, normalize_0_1
 
 
 def cand(cid, text='', last_active='2026-05-01', otw=True, yoe=6, title='ML Engineer'):

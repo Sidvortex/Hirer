@@ -1,16 +1,20 @@
 """
 Helpers for the resume modes: applying a person's edits to an extracted
-resume, reading detail files that sit next to resumes in a ZIP, and matching
-a single resume against the job list.
+resume, reading detail files that sit next to resumes in a ZIP, checking a
+GitHub link, and matching a single resume against the job list.
 """
 
 import csv
 import io
 import json
+import os
 import re
+import urllib.request
 from pathlib import PurePosixPath
 
-from hirer_core.features import experience_score, has_details
+from hirer_core.features import experience_score, full_text, has_details
+from hirer_core.jobs import PRESETS
+from hirer_core.skills import term_in
 from hirer_core.utils import contains_term
 
 RESUME_EXTS = (".pdf", ".jpg", ".jpeg", ".png", ".webp")
@@ -141,7 +145,29 @@ def summary(candidate):
         "willing_to_relocate": d.get("willing_to_relocate"),
         "has_details": has_details(candidate),
         "details_source": candidate.get("_details_source"),
+        "github": candidate.get("_github"),
     }
+
+
+def github_summary(username, timeout=5):
+    """
+    Public facts about a GitHub account named on a resume, or None.
+    Off unless HIRER_VERIFY_GITHUB=1. Set GITHUB_TOKEN for a higher request limit
+    (without one GitHub allows about 60 lookups an hour).
+    """
+    if os.environ.get("HIRER_VERIFY_GITHUB") != "1" or not username:
+        return None
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "hirer"}
+    if os.environ.get("GITHUB_TOKEN"):
+        headers["Authorization"] = "Bearer " + os.environ["GITHUB_TOKEN"]
+    try:
+        req = urllib.request.Request(f"https://api.github.com/users/{username}", headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.load(r)
+        return {"username": data["login"], "public_repos": data["public_repos"],
+                "followers": data["followers"], "last_active": (data.get("updated_at") or "")[:10]}
+    except Exception:
+        return None       # a failed lookup must never block reading the resume
 
 
 # ── detail files inside a ZIP ────────────────────────────────────────────────
@@ -210,63 +236,40 @@ def find_detail_files(zf, resume_names):
 
 # ── single resume: match against the job list ───────────────────────────────
 
-JD_LIST = [
-    {"id": 1,  "domain": "AI/ML",     "title": "Senior AI Engineer",        "company": "Redrob AI",      "keywords": ["embeddings", "vector database", "nlp", "llm", "python", "semantic search", "faiss", "ranking", "ndcg", "transformer"]},
-    {"id": 2,  "domain": "AI/ML",     "title": "ML Platform Engineer",      "company": "FinTech Corp",   "keywords": ["mlops", "kubernetes", "pytorch", "spark", "docker", "pipeline", "infrastructure", "airflow"]},
-    {"id": 3,  "domain": "AI/ML",     "title": "NLP Researcher",            "company": "AI Labs India",  "keywords": ["nlp", "bert", "transformers", "research", "publications", "language model"]},
-    {"id": 4,  "domain": "Data",      "title": "Data Scientist",            "company": "Flipkart",       "keywords": ["xgboost", "sql", "analytics", "python", "statistics", "a/b testing", "pandas", "visualization"]},
-    {"id": 5,  "domain": "Backend",   "title": "Backend Engineer",          "company": "Startup",        "keywords": ["python", "fastapi", "postgresql", "redis", "rest api", "docker", "microservices"]},
-    {"id": 6,  "domain": "Frontend",  "title": "Frontend Developer",        "company": "SaaS Co",        "keywords": ["react", "javascript", "typescript", "css", "html", "next.js", "ui", "tailwind", "figma"]},
-    {"id": 7,  "domain": "Mobile",    "title": "Android Developer",         "company": "App Studio",     "keywords": ["android", "kotlin", "java", "jetpack", "firebase", "mobile", "gradle", "xml"]},
-    {"id": 8,  "domain": "Mobile",    "title": "iOS Developer",             "company": "Product Co",     "keywords": ["ios", "swift", "xcode", "swiftui", "objective-c", "apple", "mobile"]},
-    {"id": 9,  "domain": "Mobile",    "title": "Flutter Developer",         "company": "Agency",         "keywords": ["flutter", "dart", "android", "ios", "firebase", "mobile", "cross-platform"]},
-    {"id": 10, "domain": "DevOps",    "title": "DevOps Engineer",           "company": "Cloud Corp",     "keywords": ["docker", "kubernetes", "aws", "gcp", "azure", "ci/cd", "terraform", "jenkins", "linux", "bash"]},
-    {"id": 11, "domain": "DevOps",    "title": "Cloud Architect",           "company": "Enterprise Co",  "keywords": ["aws", "gcp", "azure", "cloud", "architecture", "microservices", "terraform", "security"]},
-    {"id": 12, "domain": "DevOps",    "title": "Site Reliability Engineer", "company": "Tech Giant",     "keywords": ["sre", "kubernetes", "monitoring", "prometheus", "grafana", "linux", "on-call", "reliability"]},
-    {"id": 13, "domain": "Fullstack", "title": "Full Stack Developer",      "company": "Startup",        "keywords": ["react", "node.js", "python", "postgresql", "rest api", "docker", "javascript", "typescript"]},
-    {"id": 14, "domain": "Data",      "title": "Data Engineer",             "company": "Analytics Co",   "keywords": ["spark", "airflow", "dbt", "sql", "python", "etl", "pipeline", "kafka", "data warehouse"]},
-    {"id": 15, "domain": "Data",      "title": "Business Analyst",          "company": "Consulting",     "keywords": ["sql", "excel", "tableau", "power bi", "analytics", "requirements", "stakeholder", "data analysis"]},
-    {"id": 16, "domain": "Security",  "title": "Cybersecurity Analyst",     "company": "SecureNet",      "keywords": ["security", "penetration testing", "vulnerability", "firewall", "siem", "compliance", "linux", "python"]},
-    {"id": 17, "domain": "Product",   "title": "Product Manager",           "company": "Product Co",     "keywords": ["product management", "roadmap", "agile", "scrum", "user research", "metrics", "stakeholder", "jira"]},
-    {"id": 18, "domain": "Design",    "title": "UI/UX Designer",            "company": "Design Studio",  "keywords": ["figma", "ui", "ux", "user research", "wireframe", "prototype", "design system", "adobe"]},
-    {"id": 19, "domain": "Finance",   "title": "Financial Analyst",         "company": "Finance Corp",   "keywords": ["finance", "excel", "financial modeling", "accounting", "sql", "valuation", "reporting", "cfa"]},
-    {"id": 20, "domain": "Marketing", "title": "Digital Marketing Manager", "company": "Brand Co",       "keywords": ["marketing", "seo", "content", "social media", "analytics", "campaign", "brand", "google ads"]},
-]
+_GENERIC = {"senior", "engineer", "developer", "manager", "analyst"}
 
 
-def _role_fit(expected, jd):
+def _role_fit(expected, job):
     """1.0 if the role the candidate wants names this job or its domain"""
     if not expected:
         return 0.0
     e = expected.lower()
-    words = [w for w in re.split(r"[\s/]+", jd["title"].lower()) if len(w) > 2 and w not in ("senior", "engineer", "developer", "manager", "analyst")]
-    if contains_term(e, jd["title"].lower()) or any(contains_term(e, w) for w in words) \
-            or contains_term(e, jd["domain"].lower()):
+    words = [w for w in re.split(r"[\s/]+", job.title.lower()) if len(w) > 2 and w not in _GENERIC]
+    if contains_term(e, job.title.lower()) or any(contains_term(e, w) for w in words) \
+            or contains_term(e, job.domain.lower()):
         return 1.0
     return 0.0
 
 
 def match_jobs(candidate):
-    p = candidate.get("profile", {})
-    text = " ".join([
-        p.get("headline", ""), p.get("summary", ""), p.get("current_title", ""),
-        " ".join(s["name"] for s in candidate.get("skills", [])),
-        " ".join(j.get("description", "") for j in candidate.get("career_history", [])[:2]),
-    ]).lower()
+    text = full_text(candidate)
     expected = (candidate.get("_details") or {}).get("expected_role", "")
-    exp_s = experience_score(candidate)
 
     results = []
-    for jd in JD_LIST:
-        hits = [kw for kw in jd["keywords"] if contains_term(text, kw)]
-        kw_score = len(hits) / len(jd["keywords"])
-        role = _role_fit(expected, jd)
+    for job in PRESETS:
+        # the built-in job has a long must-have list; its ten headline skills are a fairer yardstick
+        keywords = job.must_have if job.id != 1 else [
+            "embedding", "vector database", "nlp", "llm", "python", "semantic search", "faiss",
+            "ranking", "ndcg", "transformer"]
+        hits = [kw for kw in keywords if term_in(text, kw)]
+        kw_score = len(hits) / len(keywords)
+        role = _role_fit(expected, job)
         # skills decide most of it; experience fit and the role they asked for nudge it
-        combined = min(kw_score * 0.65 + exp_s * 0.20 + role * 0.15, 0.99)
+        combined = min(kw_score * 0.65 + experience_score(candidate, job) * 0.20 + role * 0.15, 0.99)
         results.append({
-            "job_id": jd["id"], "domain": jd["domain"], "job_title": jd["title"],
-            "company": jd["company"], "match_score": round(combined, 3),
-            "keyword_hits": len(hits), "total_keywords": len(jd["keywords"]),
+            "job_id": job.id, "domain": job.domain, "job_title": job.title,
+            "company": job.company, "match_score": round(combined, 3),
+            "keyword_hits": len(hits), "total_keywords": len(keywords),
             "matched_keywords": hits, "wanted_role": bool(role),
             "recommendation": "Strong match" if combined > 0.6 else "Good match" if combined > 0.4 else "Partial match",
         })

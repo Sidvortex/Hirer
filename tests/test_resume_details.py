@@ -1,13 +1,7 @@
 import io
-import os
-import sys
 import zipfile
 
-ROOT = os.path.join(os.path.dirname(__file__), '..')
-sys.path.insert(0, ROOT)
-sys.path.insert(0, os.path.join(ROOT, 'hirer-backend'))
-
-from resumes import clean_edits, find_detail_files, apply_edits  # noqa: E402
+from resumes import clean_edits, find_detail_files, apply_edits
 
 
 def test_clean_edits_understands_loose_input():

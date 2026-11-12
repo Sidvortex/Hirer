@@ -72,24 +72,3 @@ def contains_term(text, term):
 
 def matched_terms(text, terms):
     return [t for t in terms if contains_term(text, t)]
-
-
-def build_candidate_text(candidate):
-    """text blob used for semantic matching"""
-    parts = []
-    p = candidate.get('profile', {})
-    for key in ('headline', 'summary', 'current_title'):
-        if p.get(key):
-            parts.append(p[key])
-
-    skills = [s['name'] for s in candidate.get('skills', [])]
-    if skills:
-        parts.append('Skills: ' + ', '.join(skills))
-
-    for job in candidate.get('career_history', [])[:2]:
-        if job.get('title'):
-            parts.append(job['title'])
-        if job.get('description'):
-            parts.append(job['description'][:300])
-
-    return ' '.join(parts)
